@@ -1,11 +1,10 @@
 import pandas as pd
 import streamlit as st
-import requests
-import json
 import re
 import io
 import html
 from datetime import datetime
+from google import genai
 
 # Import modul ReportLab untuk PDF
 from reportlab.lib.pagesizes import letter
@@ -13,53 +12,51 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-st.set_page_config(page_title="AI Reliability Assistant", page_icon="✈️", layout="wide")
+# ---------------------------------------------------------
+# KONFIGURASI HALAMAN
+# ---------------------------------------------------------
+st.set_page_config(
+    page_title="AERO-SYNCH | Defect & Reliability Analyzer",
+    page_icon="✈️",
+    layout="wide"
+)
 
 # ---------------------------------------------------------
-# 1. API KEY / TOKEN & FUNGSI PEMANGGILAN GEMINI REST API (SOLUSI 2)
+# SIDEBAR - INPUT API KEY GEMINI
 # ---------------------------------------------------------
-# Masukkan Token / OAuth Access Token Anda di sini:
-API_KEY = "MASUKKAN_TOKEN_ANDA_DI_SINI"
+st.sidebar.title("⚙️ Pengaturan API")
+api_key_input = st.sidebar.text_input(
+    "Masukkan Gemini API Key:",
+    type="password",
+    help="Dapatkan API Key gratis di https://aistudio.google.com/app/apikey"
+)
 
-def call_gemini_api(prompt_text, access_token):
+st.sidebar.markdown("---")
+st.sidebar.info(
+    "**AERO-SYNCH Reliability Module**\n\n"
+    "Aplikasi ini menganalisis defect historis armada pesawat "
+    "dan menghasilkan laporan rekayasa keandalan berbasis AI."
+)
+
+# ---------------------------------------------------------
+# FUNGSI PEMANGGILAN GEMINI API (SDK RESMI)
+# ---------------------------------------------------------
+def call_gemini_api(prompt_text, api_key):
     """
-    [SOLUSI 2] Pemanggilan Gemini API menggunakan Authorization: Bearer Header.
-    Cocok untuk OAuth 2.0 Access Token / Service Account Token.
+    Memanggil Gemini API menggunakan SDK resmi google-genai.
     """
-    token_clean = access_token.strip()
-    
-    # URL tanpa parameter ?key=
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-    
-    # Kunci otentikasi dikirim melalui Header Authorization Bearer
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {token_clean}"
-    }
-    
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt_text}
-                ]
-            }
-        ]
-    }
-    
-    response = requests.post(url, headers=headers, json=payload, timeout=60)
-    
-    if response.status_code == 200:
-        data = response.json()
-        try:
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-        except (KeyError, IndexError):
-            raise Exception(f"Struktur respon API tidak sesuai: {data}")
-    else:
-        raise Exception(f"HTTP {response.status_code}: {response.text}")
+    if not api_key.strip():
+        raise ValueError("API Key belum dimasukkan. Silakan isi di sidebar sebelah kiri.")
+        
+    client = genai.Client(api_key=api_key.strip())
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=prompt_text,
+    )
+    return response.text
 
 # ---------------------------------------------------------
-# 2. MEMBACA DATABASE EXCEL BERDASARKAN SHEET
+# MEMBACA DATABASE EXCEL BERDASARKAN SHEET
 # ---------------------------------------------------------
 @st.cache_data
 def load_defect_db_by_sheet(sheet_name):
@@ -67,22 +64,22 @@ def load_defect_db_by_sheet(sheet_name):
         df = pd.read_excel("defect_database.xlsx", sheet_name=sheet_name)
         return df
     except Exception as e:
-        st.error(f"Gagal membaca sheet '{sheet_name}' pada file Excel. Pastikan nama sheet sudah sesuai.")
+        st.error(f"Gagal membaca sheet '{sheet_name}' pada file Excel. Pastikan file 'defect_database.xlsx' ada di root direktori.")
         return pd.DataFrame()
 
 # ---------------------------------------------------------
-# 3. FUNGSI PENGOLAH TEKS & FISHBONE DIAGRAM KHUSUS PDF
+# FUNGSI PENGOLAH TEKS & FISHBONE DIAGRAM UNTUK PDF
 # ---------------------------------------------------------
 def process_ai_text_for_pdf(text, styles):
     story_elements = []
     
     body_style = ParagraphStyle(
-        'BodyDark', parent=styles['Normal'], fontName='Helvetica', fontSize=11, leading=15,
+        'BodyDark', parent=styles['Normal'], fontName='Helvetica', fontSize=10, leading=14,
         textColor=colors.HexColor('#1F2937')
     )
     
     code_style = ParagraphStyle(
-        'FishboneCode', parent=styles['Normal'], fontName='Courier', fontSize=8.5, leading=11,
+        'FishboneCode', parent=styles['Normal'], fontName='Courier', fontSize=8, leading=10,
         textColor=colors.HexColor('#1E3A8A'), backColor=colors.HexColor('#F3F4F6'),
         borderPadding=6, spaceBefore=6, spaceAfter=8
     )
@@ -108,7 +105,7 @@ def process_ai_text_for_pdf(text, styles):
     return story_elements
 
 # ---------------------------------------------------------
-# 4. FUNGSI GENERATE PDF REPORT
+# FUNGSI GENERATE LAPORAN PDF
 # ---------------------------------------------------------
 def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_response_text, df_history, lang="id"):
     buffer = io.BytesIO()
@@ -144,32 +141,32 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_response_text, df_
     }[lang]
 
     title_style = ParagraphStyle(
-        'DocTitle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=16, leading=20,
+        'DocTitle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=15, leading=18,
         textColor=colors.HexColor('#1E3A8A'), spaceAfter=4
     )
     subtitle_style = ParagraphStyle(
-        'DocSubTitle', parent=styles['Normal'], fontName='Helvetica', fontSize=9, leading=12,
+        'DocSubTitle', parent=styles['Normal'], fontName='Helvetica', fontSize=8.5, leading=11,
         textColor=colors.HexColor('#4B5563'), spaceAfter=10
     )
     h2_style = ParagraphStyle(
-        'SectionHeader', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=12, leading=16,
+        'SectionHeader', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=11, leading=14,
         textColor=colors.HexColor('#1E3A8A'), spaceBefore=10, spaceAfter=6
     )
     body_style = ParagraphStyle(
-        'BodyDark', parent=styles['Normal'], fontName='Helvetica', fontSize=11, leading=15,
+        'BodyDark', parent=styles['Normal'], fontName='Helvetica', fontSize=10, leading=14,
         textColor=colors.HexColor('#1F2937')
     )
     table_cell_style = ParagraphStyle(
-        'TableCell', parent=styles['Normal'], fontName='Helvetica', fontSize=10, leading=13,
+        'TableCell', parent=styles['Normal'], fontName='Helvetica', fontSize=9, leading=12,
         textColor=colors.HexColor('#1F2937')
     )
     table_header_style = ParagraphStyle(
-        'TableHeader', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=13,
+        'TableHeader', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, leading=12,
         textColor=colors.white
     )
 
     story.append(Paragraph(labels["title"], title_style))
-    story.append(Paragraph(f"Generated on: {datetime.now().strftime('%d %B %Y, %H:%M WIB')} | System: Airfast Indonesia - Defect Analyzer", subtitle_style))
+    story.append(Paragraph(f"Generated on: {datetime.now().strftime('%d %B %Y, %H:%M WIB')} | System: AERO-SYNCH Engine", subtitle_style))
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#1E3A8A'), spaceAfter=10))
 
     story.append(Paragraph(labels["sec1"], h2_style))
@@ -178,20 +175,20 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_response_text, df_
         [Paragraph(f"<b>{labels['defect_label']}</b>", body_style), Paragraph(html.escape(kasus_baru), body_style)],
         [Paragraph(f"<b>{labels['ata_label']}</b>", body_style), Paragraph(html.escape(selected_ata) if selected_ata else "N/A", body_style)]
     ]
-    t_info = Table(info_data, colWidths=[140, 416])
+    t_info = Table(info_data, colWidths=[130, 426])
     t_info.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F3F4F6')),
-        ('PADDING', (0,0), (-1,-1), 6),
+        ('PADDING', (0,0), (-1,-1), 5),
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E5E7EB'))
     ]))
     story.append(t_info)
-    story.append(Spacer(1, 10))
+    story.append(Spacer(1, 8))
 
     story.append(Paragraph(labels["sec2"], h2_style))
     ai_elements = process_ai_text_for_pdf(ai_response_text, styles)
     story.extend(ai_elements)
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1, 10))
 
     story.append(Paragraph(labels["sec3"], h2_style))
     if not df_history.empty:
@@ -223,7 +220,7 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_response_text, df_
                 row_cells.append(Paragraph(html.escape(val), table_cell_style))
             table_data.append(row_cells)
 
-        t_hist = Table(table_data, colWidths=[80, 85, 195, 196])
+        t_hist = Table(table_data, colWidths=[75, 80, 200, 201])
         t_hist.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1E3A8A')),
             ('PADDING', (0,0), (-1,-1), 5),
@@ -240,18 +237,18 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_response_text, df_
     return buffer
 
 # ---------------------------------------------------------
-# 5. INTERFACE STREAMLIT
+# ANTARMUKA UTAMA
 # ---------------------------------------------------------
-st.title("🛠️ Reliability & Defect Analyzer")
-st.write("Sistem analisis teknis berbasis histori perbaikan armada dan Machine Learning Gemini AI.")
+st.title("🛠️ AERO-SYNCH: Defect & Reliability Analyzer")
+st.write("Sistem Analisis Rekayasa Keandalan Penerbangan Berbasis Histori Maintenance & Gemini AI.")
 
 col_ac, col_ata = st.columns([2, 1])
 
 with col_ac:
     ac_type = st.selectbox(
-        "✈️ Pilih Aircraft Type / Fleet:",
+        "✈️ Pilih Armada / Tipe Pesawat:",
         options=["B737-8", "DHC6-300", "DHC6-400", "BELL-412", "AS350B3", "MIL-171"],
-        help="Sistem akan otomatis memuat database histori sesuai sheet tipe pesawat ini."
+        help="Sistem akan otomatis mencocokkan data dari sheet Excel sesuai tipe ini."
     )
 
 with col_ata:
@@ -261,12 +258,14 @@ with col_ata:
     )
 
 kasus_baru = st.text_area(
-    "Masukkan Deskripsi Defect / Pilot Report Baru:",
-    placeholder="Contoh: RH LANDING LIGHT OFF DURING FLIGHT"
+    "Masukkan Deskripsi Defect / Discrepancy Baru:",
+    placeholder="Contoh: HYDRAULIC PUMP CYCLING FREQUENTLY IN FLIGHT"
 )
 
 if st.button("Analisis Kasus & History", type="primary"):
-    if kasus_baru.strip():
+    if not api_key_input.strip():
+        st.error("⚠️ Silakan masukkan Gemini API Key Anda pada menu Sidebar di sebelah kiri terlebih dahulu.")
+    elif kasus_baru.strip():
         df_defect = load_defect_db_by_sheet(ac_type)
         
         if not df_defect.empty:
@@ -353,33 +352,28 @@ Provide the exact same technical analysis translated into professional aviation 
 
             with st.spinner(f"Menganalisis histori armada {ac_type} dan menyusun rekomendasi via Gemini..."):
                 try:
-                    full_text = call_gemini_api(prompt, API_KEY)
-
+                    full_text = call_gemini_api(prompt, api_key_input)
                 except Exception as e:
                     st.error(f"⚠️ **Gagal terhubung ke Gemini API:** {e}")
-                    
-                    fallback_id = f"1. ANALISIS REPETITIVE DEFECT: Terdeteksi {jumlah_match} kejadian serupa pada armada {ac_type} ATA {selected_ata if selected_ata else 'N/A'} ({date_range_info}).\n\n2. ROOT CAUSE ANALYSIS (RCA):\n```\n[ENVIRONMENT]           [MECHANICAL]\n      |                       |\n      +-- Moisture Ingress    +-- Vibration\n      |                       |\n-------------------------------------------> DEFECT: {kasus_baru}\n      |                       |\n      +-- Voltage Fluctuation +-- Component Wear\n      |                       |\n[ELECTRICAL]            [MAINTENANCE]\n```\n\n3. REKOMENDASI TROUBLESHOOTING: Visual inspection, wiring insulation check, ground stud bonding test IAW AMM {ac_type}."
-                    
-                    fallback_en = f"1. REPETITIVE DEFECT ANALYSIS: Recorded {jumlah_match} similar occurrences under {ac_type} ATA {selected_ata if selected_ata else 'N/A'} ({date_range_info}).\n\n2. ROOT CAUSE ANALYSIS (RCA):\n```\n[ENVIRONMENT]           [MECHANICAL]\n      |                       |\n      +-- Moisture Ingress    +-- Vibration\n      |                       |\n-------------------------------------------> DEFECT: {kasus_baru}\n      |                       |\n      +-- Voltage Fluctuation +-- Component Wear\n      |                       |\n[ELECTRICAL]            [MAINTENANCE]\n```\n\n3. TROUBLESHOOTING RECOMMENDATION: Visual inspection, wiring insulation test, ground stud bonding integrity IAW {ac_type} AMM."
-                    
-                    full_text = f"[BAGIAN INDONESIA]\n{fallback_id}\n\n[BAGIAN ENGLISH]\n{fallback_en}"
+                    full_text = ""
 
-                if "[BAGIAN ENGLISH]" in full_text:
-                    parts = full_text.split("[BAGIAN ENGLISH]")
-                    text_id = parts[0].replace("[BAGIAN INDONESIA]", "").strip()
-                    text_en = parts[1].strip()
-                else:
-                    text_id = full_text
-                    text_en = full_text
+                if full_text:
+                    if "[BAGIAN ENGLISH]" in full_text:
+                        parts = full_text.split("[BAGIAN ENGLISH]")
+                        text_id = parts[0].replace("[BAGIAN INDONESIA]", "").strip()
+                        text_en = parts[1].strip()
+                    else:
+                        text_id = full_text
+                        text_en = full_text
 
-                st.session_state['ai_result_id'] = text_id
-                st.session_state['ai_result_en'] = text_en
+                    st.session_state['ai_result_id'] = text_id
+                    st.session_state['ai_result_en'] = text_en
 
     else:
         st.warning("Mohon masukkan deskripsi defect terlebih dahulu.")
 
 # ---------------------------------------------------------
-# 6. TAMPILAN HASIL & DOKUMEN PDF
+# HASIL DAN DOWNLOAD REPORT
 # ---------------------------------------------------------
 if 'ai_result_id' in st.session_state:
     st.subheader(f"📋 Hasil Analisis AI ({st.session_state['ac_type']})")
