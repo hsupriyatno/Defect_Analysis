@@ -18,19 +18,18 @@ st.set_page_config(page_title="AI Reliability Assistant", page_icon="✈️", la
 # ---------------------------------------------------------
 # 1. API KEY & FUNGSI PEMANGGILAN GEMINI REST API
 # ---------------------------------------------------------
-# Tempelkan API Key baru berawalan AQ... milik Anda di sini:
+# masukkan API Key berawalan AQ... milik Anda di sini:
 API_KEY = "AQ.Ab8RN6IqgCP6DRtBGsftwpbfah1B22ZkJCC3olYQhM8ptHMBXA"
 
 def call_gemini_api(prompt_text, api_key):
     """
-    Memanggil Gemini REST API langsung menggunakan header x-goog-api-key 
-    yang diwajibkan untuk API key berawalan 'AQ...'.
+    Memanggil Gemini REST API dengan query parameter key yang valid.
     """
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    clean_key = api_key.strip()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}"
     
     headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": api_key.strip()
+        "Content-Type": "application/json"
     }
     
     payload = {
@@ -349,7 +348,6 @@ Provide the exact same technical analysis translated into professional aviation 
 
             with st.spinner(f"Menganalisis histori armada {ac_type} dan menyusun rekomendasi via Gemini..."):
                 try:
-                    # Memanggil REST API langsung dengan header x-goog-api-key
                     full_text = call_gemini_api(prompt, API_KEY)
 
                 except Exception as e:
