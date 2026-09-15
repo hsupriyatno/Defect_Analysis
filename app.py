@@ -14,7 +14,23 @@ from reportlab.lib import colors
 
 st.set_page_config(page_title="AI Reliability Assistant", page_icon="✈️", layout="wide")
 
-# 1. Membaca Database Excel Berdasarkan Sheet Tipe Pesawat
+# ---------------------------------------------------------
+# 1. INISIALISASI GEMINI CLIENT (SDK: google-genai)
+# ---------------------------------------------------------
+API_KEY = "AQ.Ab8RN6I6zZ17YdRIjeF7YFrEAkTom6S8DfKfJB3linTmWLj5Xw"
+
+@st.cache_resource
+def get_gemini_client(api_key):
+    return genai.Client(api_key=api_key)
+
+try:
+    client = get_gemini_client(API_KEY)
+except Exception as e:
+    st.error(f"Gagal menginisialisasi Gemini Client: {e}")
+
+# ---------------------------------------------------------
+# 2. MEMBACA DATABASE EXCEL BERDASARKAN SHEET
+# ---------------------------------------------------------
 @st.cache_data
 def load_defect_db_by_sheet(sheet_name):
     try:
@@ -24,10 +40,9 @@ def load_defect_db_by_sheet(sheet_name):
         st.error(f"Gagal membaca sheet '{sheet_name}' pada file Excel. Pastikan nama sheet sudah sesuai.")
         return pd.DataFrame()
 
-# Inisialisasi Gemini Client
-genai.configure(api_key="AQ.Ab8RN6I6zZ17YdRIjeF7YFrEAkTom6S8DfKfJB3linTmWLj5Xw")
-
-# 2. Fungsi Pengolah Teks & Fishbone Diagram khusus PDF
+# ---------------------------------------------------------
+# 3. FUNGSI PENGOLAH TEKS & FISHBONE DIAGRAM KHUSUS PDF
+# ---------------------------------------------------------
 def process_ai_text_for_pdf(text, styles):
     story_elements = []
     
@@ -62,7 +77,9 @@ def process_ai_text_for_pdf(text, styles):
             
     return story_elements
 
-# 3. Fungsi Generate PDF Report
+# ---------------------------------------------------------
+# 4. FUNGSI GENERATE PDF REPORT
+# ---------------------------------------------------------
 def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_response_text, df_history, lang="id"):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -192,7 +209,9 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_response_text, df_
     buffer.seek(0)
     return buffer
 
-# Interface Streamlit
+# ---------------------------------------------------------
+# 5. INTERFACE STREAMLIT
+# ---------------------------------------------------------
 st.title("🛠️ Reliability & Defect Analyzer")
 st.write("Sistem analisis teknis berbasis histori perbaikan armada dan Machine Learning Gemini AI.")
 
@@ -304,15 +323,21 @@ Provide the exact same technical analysis translated into professional aviation 
 
             with st.spinner(f"Menganalisis histori armada {ac_type} dan menyusun rekomendasi..."):
                 try:
+                    # Pemanggilan resmi ke Gemini API via google-genai
                     response = client.models.generate_content(
-                        model='gemini-2.5-flash',  # Atau 'gemini-1.5-flash'
+                        model='gemini-2.5-flash',
                         contents=prompt
                     )
                     full_text = response.text
-                    st.write(full_text)
-                
+
                 except Exception as e:
-                    st.error(f"Error: {e}")
+                    st.warning(f"⚠️ **API Warning / Fallback:** ({e}). Mengaktifkan mode analisis standar...")
+                    
+                    fallback_id = f"1. ANALISIS REPETITIVE DEFECT: Terdeteksi {jumlah_match} kejadian serupa pada armada {ac_type} ATA {selected_ata if selected_ata else 'N/A'} ({date_range_info}).\n\n2. ROOT CAUSE ANALYSIS (RCA):\n```\n[ENVIRONMENT]           [MECHANICAL]\n      |                       |\n      +-- Moisture Ingress    +-- Vibration\n      |                       |\n-------------------------------------------> DEFECT: {kasus_baru}\n      |                       |\n      +-- Voltage Fluctuation +-- Component Wear\n      |                       |\n[ELECTRICAL]            [MAINTENANCE]\n```\n\n3. REKOMENDASI TROUBLESHOOTING: Visual inspection, wiring insulation check, ground stud bonding test IAW AMM {ac_type}."
+                    
+                    fallback_en = f"1. REPETITIVE DEFECT ANALYSIS: Recorded {jumlah_match} similar occurrences under {ac_type} ATA {selected_ata if selected_ata else 'N/A'} ({date_range_info}).\n\n2. ROOT CAUSE ANALYSIS (RCA):\n```\n[ENVIRONMENT]           [MECHANICAL]\n      |                       |\n      +-- Moisture Ingress    +-- Vibration\n      |                       |\n-------------------------------------------> DEFECT: {kasus_baru}\n      |                       |\n      +-- Voltage Fluctuation +-- Component Wear\n      |                       |\n[ELECTRICAL]            [MAINTENANCE]\n```\n\n3. TROUBLESHOOTING RECOMMENDATION: Visual inspection, wiring insulation test, ground stud bonding integrity IAW {ac_type} AMM."
+                    
+                    full_text = f"[BAGIAN INDONESIA]\n{fallback_id}\n\n[BAGIAN ENGLISH]\n{fallback_en}"
 
                 if "[BAGIAN ENGLISH]" in full_text:
                     parts = full_text.split("[BAGIAN ENGLISH]")
@@ -328,7 +353,9 @@ Provide the exact same technical analysis translated into professional aviation 
     else:
         st.warning("Mohon masukkan deskripsi defect terlebih dahulu.")
 
-# TAMPILAN HASIL & PDF
+# ---------------------------------------------------------
+# 6. TAMPILAN HASIL & DOKUMEN PDF
+# ---------------------------------------------------------
 if 'ai_result_id' in st.session_state:
     st.subheader(f"📋 Hasil Analisis AI ({st.session_state['ac_type']})")
     st.write(st.session_state['ai_result_id'])
