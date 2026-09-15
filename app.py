@@ -307,9 +307,6 @@ Provide the exact same technical analysis translated into professional aviation 
                     model = genai.GenerativeModel('gemini-1.5-flash')
                     response = model.generate_content(prompt)
                     full_text = response.text
-                    )
-                    full_text = response.text
-
                 except Exception as e:
                     st.warning(f"⚠️ **API Limit/Warning:** Kuota harian API tercapai ({e}). Mengaktifkan mode analisis standar...")
                     
