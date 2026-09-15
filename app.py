@@ -1,6 +1,7 @@
 import pandas as pd
 import streamlit as st
-from google import genai
+import requests
+import json
 import re
 import io
 import html
@@ -15,18 +16,42 @@ from reportlab.lib import colors
 st.set_page_config(page_title="AI Reliability Assistant", page_icon="✈️", layout="wide")
 
 # ---------------------------------------------------------
-# 1. INISIALISASI GEMINI CLIENT (SDK: google-genai)
+# 1. API KEY & FUNGSI PEMANGGILAN GEMINI REST API
 # ---------------------------------------------------------
 API_KEY = "AQ.Ab8RN6I6zZ17YdRIjeF7YFrEAkTom6S8DfKfJB3linTmWLj5Xw"
 
-@st.cache_resource
-def get_gemini_client(api_key):
-    return genai.Client(api_key=api_key)
-
-try:
-    client = get_gemini_client(API_KEY)
-except Exception as e:
-    st.error(f"Gagal menginisialisasi Gemini Client: {e}")
+def call_gemini_api(prompt_text, api_key):
+    """
+    Memanggil Gemini REST API langsung menggunakan header x-goog-api-key 
+    untuk menghindari error 401 ACCESS_TOKEN_TYPE_UNSUPPORTED pada key AQ.
+    """
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": api_key.strip()
+    }
+    
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt_text}
+                ]
+            }
+        ]
+    }
+    
+    response = requests.post(url, headers=headers, json=payload, timeout=60)
+    
+    if response.status_code == 200:
+        data = response.json()
+        try:
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError):
+            raise Exception(f"Struktur respon API tidak sesuai: {data}")
+    else:
+        raise Exception(f"HTTP {response.status_code}: {response.text}")
 
 # ---------------------------------------------------------
 # 2. MEMBACA DATABASE EXCEL BERDASARKAN SHEET
@@ -321,17 +346,13 @@ Berikan analisis teknis lengkap yang terfokus pada sistem/komponen tipe pesawat 
 Provide the exact same technical analysis translated into professional aviation engineering English specifically for {ac_type}.
 """
 
-            with st.spinner(f"Menganalisis histori armada {ac_type} dan menyusun rekomendasi..."):
+            with st.spinner(f"Menganalisis histori armada {ac_type} dan menyusun rekomendasi via Gemini..."):
                 try:
-                    # Pemanggilan resmi ke Gemini API via google-genai
-                    response = client.models.generate_content(
-                        model='gemini-2.5-flash',
-                        contents=prompt
-                    )
-                    full_text = response.text
+                    # Memanggil REST API langsung dengan header x-goog-api-key
+                    full_text = call_gemini_api(prompt, API_KEY)
 
                 except Exception as e:
-                    st.warning(f"⚠️ **API Warning / Fallback:** ({e}). Mengaktifkan mode analisis standar...")
+                    st.error(f"⚠️ **Gagal terhubung ke Gemini API:** {e}")
                     
                     fallback_id = f"1. ANALISIS REPETITIVE DEFECT: Terdeteksi {jumlah_match} kejadian serupa pada armada {ac_type} ATA {selected_ata if selected_ata else 'N/A'} ({date_range_info}).\n\n2. ROOT CAUSE ANALYSIS (RCA):\n```\n[ENVIRONMENT]           [MECHANICAL]\n      |                       |\n      +-- Moisture Ingress    +-- Vibration\n      |                       |\n-------------------------------------------> DEFECT: {kasus_baru}\n      |                       |\n      +-- Voltage Fluctuation +-- Component Wear\n      |                       |\n[ELECTRICAL]            [MAINTENANCE]\n```\n\n3. REKOMENDASI TROUBLESHOOTING: Visual inspection, wiring insulation check, ground stud bonding test IAW AMM {ac_type}."
                     
