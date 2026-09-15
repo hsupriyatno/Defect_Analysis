@@ -18,12 +18,13 @@ st.set_page_config(page_title="AI Reliability Assistant", page_icon="✈️", la
 # ---------------------------------------------------------
 # 1. API KEY & FUNGSI PEMANGGILAN GEMINI REST API
 # ---------------------------------------------------------
+# Tempelkan API Key baru berawalan AQ... milik Anda di sini:
 API_KEY = "AQ.Ab8RN6IqgCP6DRtBGsftwpbfah1B22ZkJCC3olYQhM8ptHMBXA"
 
 def call_gemini_api(prompt_text, api_key):
     """
     Memanggil Gemini REST API langsung menggunakan header x-goog-api-key 
-    untuk menghindari error 401 ACCESS_TOKEN_TYPE_UNSUPPORTED pada key AQ.
+    yang diwajibkan untuk API key berawalan 'AQ...'.
     """
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
     
