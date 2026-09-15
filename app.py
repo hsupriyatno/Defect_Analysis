@@ -1,6 +1,6 @@
 import pandas as pd
 import streamlit as st
-import google.generativeai as genai
+from google import genai
 import re
 import io
 import html
@@ -304,17 +304,15 @@ Provide the exact same technical analysis translated into professional aviation 
 
             with st.spinner(f"Menganalisis histori armada {ac_type} dan menyusun rekomendasi..."):
                 try:
-                    model = genai.GenerativeModel('gemini-1.5-flash')
-                    response = model.generate_content(prompt)
+                    response = client.models.generate_content(
+                        model='gemini-2.5-flash',  # Atau 'gemini-1.5-flash'
+                        contents=prompt
+                    )
                     full_text = response.text
+                    st.write(full_text)
+                
                 except Exception as e:
-                    st.warning(f"⚠️ **API Limit/Warning:** Kuota harian API tercapai ({e}). Mengaktifkan mode analisis standar...")
-                    
-                    fallback_id = f"1. ANALISIS REPETITIVE DEFECT: Terdeteksi {jumlah_match} kejadian serupa pada armada {ac_type} ATA {selected_ata if selected_ata else 'N/A'} ({date_range_info}).\n\n2. ROOT CAUSE ANALYSIS (RCA):\n```\n[ENVIRONMENT]           [MECHANICAL]\n      |                      |\n      +-- Moisture Ingress   +-- Vibration\n      |                      |\n-------------------------------------------> DEFECT: {kasus_baru}\n      |                      |\n      +-- Voltage Fluctuation+-- Component Wear\n      |                      |\n[ELECTRICAL]            [MAINTENANCE]\n```\n\n3. REKOMENDASI TROUBLESHOOTING: Visual inspection, wiring insulation check, ground stud bonding test IAW AMM {ac_type}."
-                    
-                    fallback_en = f"1. REPETITIVE DEFECT ANALYSIS: Recorded {jumlah_match} similar occurrences under {ac_type} ATA {selected_ata if selected_ata else 'N/A'} ({date_range_info}).\n\n2. ROOT CAUSE ANALYSIS (RCA):\n```\n[ENVIRONMENT]           [MECHANICAL]\n      |                      |\n      +-- Moisture Ingress   +-- Vibration\n      |                      |\n-------------------------------------------> DEFECT: {kasus_baru}\n      |                      |\n      +-- Voltage Fluctuation+-- Component Wear\n      |                      |\n[ELECTRICAL]            [MAINTENANCE]\n```\n\n3. TROUBLESHOOTING RECOMMENDATION: Visual inspection, wiring insulation test, ground stud bonding integrity IAW {ac_type} AMM."
-                    
-                    full_text = f"[BAGIAN INDONESIA]\n{fallback_id}\n\n[BAGIAN ENGLISH]\n{fallback_en}"
+                    st.error(f"Error: {e}")
 
                 if "[BAGIAN ENGLISH]" in full_text:
                     parts = full_text.split("[BAGIAN ENGLISH]")
