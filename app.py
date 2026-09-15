@@ -1,6 +1,6 @@
 import pandas as pd
 import streamlit as st
-from google import genai
+import google.generativeai as genai
 import re
 import io
 import html
@@ -304,9 +304,9 @@ Provide the exact same technical analysis translated into professional aviation 
 
             with st.spinner(f"Menganalisis histori armada {ac_type} dan menyusun rekomendasi..."):
                 try:
-                    response = client.models.generate_content(
-                        model='gemini-3.6-flash',
-                        contents=prompt
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    response = model.generate_content(prompt)
+                    full_text = response.text
                     )
                     full_text = response.text
 
