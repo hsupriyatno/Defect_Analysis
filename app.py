@@ -43,14 +43,14 @@ st.sidebar.info(
 # ---------------------------------------------------------
 def call_gemini_api(prompt_text, api_key):
     """
-    Memanggil Gemini API menggunakan SDK resmi google-genai.
+    Memanggil Gemini API menggunakan SDK resmi google-genai dengan model gemini-3.6-flash.
     """
     if not api_key.strip():
         raise ValueError("API Key belum dimasukkan. Silakan isi di sidebar sebelah kiri.")
         
     client = genai.Client(api_key=api_key.strip())
     response = client.models.generate_content(
-        model='gemini-2.5-flash',
+        model='gemini-3.6-flash',
         contents=prompt_text,
     )
     return response.text
