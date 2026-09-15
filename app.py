@@ -18,7 +18,7 @@ st.set_page_config(page_title="AI Reliability Assistant", page_icon="✈️", la
 # ---------------------------------------------------------
 # 1. API KEY & FUNGSI PEMANGGILAN GEMINI REST API
 # ---------------------------------------------------------
-API_KEY = "AQ.Ab8RN6I6zZ17YdRIjeF7YFrEAkTom6S8DfKfJB3linTmWLj5Xw"
+API_KEY = "AQ.Ab8RN6IqgCP6DRtBGsftwpbfah1B22ZkJCC3olYQhM8ptHMBXA"
 
 def call_gemini_api(prompt_text, api_key):
     """
