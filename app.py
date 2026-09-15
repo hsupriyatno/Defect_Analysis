@@ -16,20 +16,25 @@ from reportlab.lib import colors
 st.set_page_config(page_title="AI Reliability Assistant", page_icon="✈️", layout="wide")
 
 # ---------------------------------------------------------
-# 1. API KEY & FUNGSI PEMANGGILAN GEMINI REST API
+# 1. API KEY / TOKEN & FUNGSI PEMANGGILAN GEMINI REST API (SOLUSI 2)
 # ---------------------------------------------------------
-# masukkan API Key berawalan AQ... milik Anda di sini:
-API_KEY = "AQ.Ab8RN6IqgCP6DRtBGsftwpbfah1B22ZkJCC3olYQhM8ptHMBXA"
+# Masukkan Token / OAuth Access Token Anda di sini:
+API_KEY = "MASUKKAN_TOKEN_ANDA_DI_SINI"
 
-def call_gemini_api(prompt_text, api_key):
+def call_gemini_api(prompt_text, access_token):
     """
-    Memanggil Gemini REST API dengan query parameter key yang valid.
+    [SOLUSI 2] Pemanggilan Gemini API menggunakan Authorization: Bearer Header.
+    Cocok untuk OAuth 2.0 Access Token / Service Account Token.
     """
-    clean_key = api_key.strip()
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}"
+    token_clean = access_token.strip()
     
+    # URL tanpa parameter ?key=
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    
+    # Kunci otentikasi dikirim melalui Header Authorization Bearer
     headers = {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token_clean}"
     }
     
     payload = {
