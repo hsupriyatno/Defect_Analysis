@@ -25,7 +25,7 @@ def load_defect_db_by_sheet(sheet_name):
         return pd.DataFrame()
 
 # Inisialisasi Gemini Client
-client = genai.Client(api_key="AQ.Ab8RN6I7Qs8WyDu_T6-IA73y9eUMI2UJu6IiQ3brP355XkZSNA")
+client = genai.Client(api_key="AQ.Ab8RN6I6zZ17YdRljeF7YFrEAkTom6S8DfKfJB3linTmWLj5Xw")
 
 # 2. Fungsi Pengolah Teks & Fishbone Diagram khusus PDF
 def process_ai_text_for_pdf(text, styles):
