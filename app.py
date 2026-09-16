@@ -41,19 +41,55 @@ st.sidebar.info(
 # ---------------------------------------------------------
 # FUNGSI PEMANGGILAN GEMINI API (SDK RESMI)
 # ---------------------------------------------------------
-def call_gemini_api(prompt_text, api_key):
+def call_gemini_api(prompt_text, user_api_key=""):
     """
-    Memanggil Gemini API menggunakan SDK resmi google-genai.
+    Memanggil Gemini API via REST HTTP Request langsung untuk menghindari bug
+    penanganan API Key format baru (AQ.) pada SDK google-genai.
     """
-    if not api_key.strip():
-        raise ValueError("API Key belum dimasukkan. Silakan isi di sidebar sebelah kiri.")
+    # 1. Prioritaskan API Key dari Input Sidebar, jika kosong gunakan Streamlit Secrets
+    api_key = user_api_key.strip() if user_api_key else ""
+    
+    if not api_key:
+        try:
+            if "GEMINI_API_KEY" in st.secrets:
+                api_key = st.secrets["GEMINI_API_KEY"]
+        except Exception:
+            pass
+
+    if not api_key:
+        raise ValueError("API Key tidak ditemukan. Silakan masukkan di sidebar atau konfigurasi Streamlit Secrets.")
+
+    clean_api_key = str(api_key).strip().strip('"').strip("'")
+
+    # 2. EndPoint REST API Gemini (Gemini 2.5 Flash)
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_api_key}"
+    
+    headers = {
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt_text}
+                ]
+            }
+        ]
+    }
+
+    # 3. Eksekusi Request HTTP
+    response = requests.post(url, headers=headers, json=payload, timeout=60)
+    
+    if response.status_code != 200:
+        raise ValueError(f"Error {response.status_code}: {response.text}")
         
-    client = genai.Client(api_key=api_key.strip())
-    response = client.models.generate_content(
-        model='gemini-3.6-flash',
-        contents=prompt_text,
-    )
-    return response.text
+    res_json = response.json()
+    
+    try:
+        return res_json['candidates'][0]['content']['parts'][0]['text']
+    except (KeyError, IndexError):
+        raise ValueError(f"Respon tidak sesuai format: {res_json}")
 
 # ---------------------------------------------------------
 # MEMBACA DATABASE EXCEL BERDASARKAN SHEET
