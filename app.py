@@ -39,11 +39,15 @@ def call_gemini_api(prompt_text):
     Memanggil Gemini API menggunakan SDK resmi google-genai dengan model gemini-3.6-flash.
     API Key diambil otomatis dari Streamlit Secrets (st.secrets).
     """
-    # Mengambil API key dari secrets (.streamlit/secrets.toml)
-    api_key = st.secrets.get("GEMINI_API_KEY", "")
-    
+    api_key = ""
+    try:
+        if "GEMINI_API_KEY" in st.secrets:
+            api_key = st.secrets["GEMINI_API_KEY"]
+    except Exception:
+        pass
+
     if not api_key:
-        raise ValueError("API Key tidak ditemukan dalam st.secrets. Pastikan 'GEMINI_API_KEY' sudah dikonfigurasi pada file secrets.toml.")
+        raise ValueError("API Key tidak ditemukan. Pastikan 'GEMINI_API_KEY' sudah dikonfigurasi pada menu Secrets di Streamlit Cloud atau .streamlit/secrets.toml.")
         
     client = genai.Client(api_key=api_key.strip())
     response = client.models.generate_content(
@@ -53,16 +57,18 @@ def call_gemini_api(prompt_text):
     return response.text
 
 # ---------------------------------------------------------
-# MEMBACA DATABASE EXCEL BERDASARKAN SHEET
+# MEMBACA DATABASE EXCEL BERDASARKAN SHEET (SAFE LOAD)
 # ---------------------------------------------------------
-@st.cache_data
 def load_defect_db_by_sheet(sheet_name):
     try:
         df = pd.read_excel("defect_database.xlsx", sheet_name=sheet_name)
-        return df
+        return df, None
+    except FileNotFoundError:
+        return pd.DataFrame(), "File 'defect_database.xlsx' tidak ditemukan di root direktori."
+    except ValueError:
+        return pd.DataFrame(), f"Sheet '{sheet_name}' tidak ditemukan di dalam file 'defect_database.xlsx'."
     except Exception as e:
-        st.error(f"Gagal membaca sheet '{sheet_name}' pada file Excel. Pastikan file 'defect_database.xlsx' ada di root direktori.")
-        return pd.DataFrame()
+        return pd.DataFrame(), f"Gagal membaca database: {str(e)}"
 
 # ---------------------------------------------------------
 # FUNGSI PENGOLAH TEKS & FISHBONE DIAGRAM UNTUK PDF
@@ -234,4 +240,185 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_response_text, df_
     return buffer
 
 # ---------------------------------------------------------
-# ANTARMUKA UT
+# ANTARMUKA UTAMA
+# ---------------------------------------------------------
+st.title("🛠️ AERO-SYNCH: Defect & Reliability Analyzer")
+st.write("Sistem Analisis Rekayasa Keandalan Penerbangan Berbasis Histori Maintenance & Gemini AI.")
+
+col_ac, col_ata = st.columns([2, 1])
+
+with col_ac:
+    ac_type = st.selectbox(
+        "✈️ Pilih Armada / Tipe Pesawat:",
+        options=["B737-8", "DHC6-300", "DHC6-400", "BELL-412", "AS350B3", "MIL-171"],
+        help="Sistem akan otomatis mencocokkan data dari sheet Excel sesuai tipe ini."
+    )
+
+with col_ata:
+    selected_ata = st.text_input(
+        "ATA Chapter (Opsional):",
+        placeholder="Contoh: 33"
+    )
+
+kasus_baru = st.text_area(
+    "Masukkan Deskripsi Defect / Discrepancy Baru:",
+    placeholder="Contoh: HYDRAULIC PUMP CYCLING FREQUENTLY IN FLIGHT"
+)
+
+if st.button("Analisis Kasus & History", type="primary"):
+    if kasus_baru.strip():
+        df_defect, err_msg = load_defect_db_by_sheet(ac_type)
+        
+        if err_msg:
+            st.warning(f"⚠️ {err_msg}. Analisis AI akan tetap berjalan tanpa histori database.")
+
+        if not df_defect.empty:
+            stop_words = {
+                "FOUND", "DURING", "PRE", "FLIGHT", "AFTER", "IN", "AT", "ON", "AND", 
+                "THE", "TO", "OF", "WITH", "IS", "WAS", "FOR", "CHECK", "INSPECTED"
+            }
+            
+            raw_words = re.findall(r'\b[A-Za-z0-9]+\b', kasus_baru.upper())
+            keywords = [w for w in raw_words if len(w) > 2 and w not in stop_words]
+            
+            mask = pd.Series(True, index=df_defect.index)
+            
+            if keywords:
+                pattern = "|".join(keywords)
+                mask = mask & df_defect['Note / Report'].astype(str).str.contains(pattern, case=False, na=False)
+                
+            if selected_ata.strip():
+                ata_clean = re.sub(r'\D', '', selected_ata)
+                if 'ATA' in df_defect.columns and ata_clean:
+                    mask = mask & df_defect['ATA'].astype(str).str.contains(ata_clean, na=False)
+
+            history_match = df_defect[mask]
+
+            if not history_match.empty:
+                df_history_sorted = history_match.copy()
+                df_history_sorted['Date_Parsed'] = pd.to_datetime(df_history_sorted['Date'], errors='coerce')
+                df_history_sorted = df_history_sorted.sort_values(by='Date_Parsed', ascending=False)
+                
+                min_date = df_history_sorted['Date_Parsed'].min()
+                max_date = df_history_sorted['Date_Parsed'].max()
+                
+                if pd.notnull(min_date) and pd.notnull(max_date):
+                    start_str = min_date.strftime('%d %B %Y')
+                    end_str = max_date.strftime('%d %B %Y')
+                    months_diff = round((max_date - min_date).days / 30.44)
+                    date_range_info = f"Rentang waktu dari {start_str} sampai {end_str} (sekitar {months_diff} bulan)."
+                else:
+                    date_range_info = "Rentang waktu data tidak dapat diidentifikasi."
+
+                kolom_ringkas = ['Date', 'AML No', 'Note / Report', 'Corrective Action', 'P/N Off', 'P/N On', 'ATA']
+                kolom_tersedia = [c for c in kolom_ringkas if c in df_history_sorted.columns]
+                
+                context_history = df_history_sorted[kolom_tersedia].head(15).to_string(index=False)
+                jumlah_match = len(df_history_sorted)
+            else:
+                context_history = "Tidak ditemukan riwayat defect serupa di database armada ini."
+                jumlah_match = 0
+                date_range_info = "N/A"
+                df_history_sorted = pd.DataFrame()
+        else:
+            context_history = "Database tidak tersedia."
+            jumlah_match = 0
+            date_range_info = "N/A"
+            df_history_sorted = pd.DataFrame()
+
+        st.session_state['ac_type'] = ac_type
+        st.session_state['kasus_baru'] = kasus_baru
+        st.session_state['selected_ata'] = selected_ata
+        st.session_state['history_match'] = df_history_sorted
+
+        prompt = f"""
+Anda adalah seorang pakar Reliability Engineering penerbangan spesialis armada {ac_type}.
+
+TIPE PESAWAT: {ac_type}
+KASUS BARU YANG DILAPORKAN:
+{kasus_baru} (ATA Chapter: {selected_ata if selected_ata else 'N/A'})
+
+DATA HISTORI DARI DATABASE ARMADA {ac_type}:
+- Total Ditemukan: {jumlah_match} record/kejadian defect serupa.
+- Periode Waktu Kejadian: {date_range_info}
+
+SAMPEL 15 RECORD TERAKHIR DARI DATABASE ARMADA {ac_type}:
+{context_history}
+
+TUGAS ANDA:
+Berikan analisis teknis lengkap yang terfokus pada sistem/komponen tipe pesawat {ac_type} dalam 2 BAGIAN EKSPLISIT:
+
+[BAGIAN INDONESIA]
+1. Analisis Indikasi Repetitive Defect (gunakan data total {jumlah_match} kejadian dalam periode {date_range_info} untuk tipe {ac_type}).
+2. Root Cause Analysis (RCA) spesifik untuk {ac_type}:
+   - Sertakan Diagram Fishbone / Ishikawa sederhana di dalam block code (menggunakan tanda triple backtick ``` ).
+   - PENTING: Gunakan karakter ASCII standar seperti huruf, spasi, hyphens (-), plus (+), dan pipa (|). JANGAN gunakan karakter unicode khusus atau balok tebal.
+3. Rekomendasi Langkah Troubleshooting / Corrective Action (IAW AMM/WDM {ac_type}).
+
+[BAGIAN ENGLISH]
+Provide the exact same technical analysis translated into professional aviation engineering English specifically for {ac_type}.
+"""
+
+        with st.spinner(f"Menganalisis histori armada {ac_type} dan menyusun rekomendasi via Gemini..."):
+            try:
+                full_text = call_gemini_api(prompt)
+            except Exception as e:
+                st.error(f"⚠️ **Gagal terhubung ke Gemini API:** {e}")
+                full_text = ""
+
+            if full_text:
+                if "[BAGIAN ENGLISH]" in full_text:
+                    parts = full_text.split("[BAGIAN ENGLISH]")
+                    text_id = parts[0].replace("[BAGIAN INDONESIA]", "").strip()
+                    text_en = parts[1].strip()
+                else:
+                    text_id = full_text
+                    text_en = full_text
+
+                st.session_state['ai_result_id'] = text_id
+                st.session_state['ai_result_en'] = text_en
+
+    else:
+        st.warning("Mohon masukkan deskripsi defect terlebih dahulu.")
+
+# ---------------------------------------------------------
+# HASIL DAN DOWNLOAD REPORT
+# ---------------------------------------------------------
+if 'ai_result_id' in st.session_state:
+    st.subheader(f"📋 Hasil Analisis AI ({st.session_state['ac_type']})")
+    st.write(st.session_state['ai_result_id'])
+    
+    st.divider()
+    
+    col_pdf1, col_pdf2 = st.columns([2, 2])
+    with col_pdf1:
+        pdf_lang = st.radio(
+            "🌐 Pilih Bahasa Laporan PDF:",
+            options=["Bahasa Indonesia", "English"],
+            horizontal=True
+        )
+    
+    lang_code = "id" if pdf_lang == "Bahasa Indonesia" else "en"
+    selected_ai_text = st.session_state['ai_result_id'] if lang_code == "id" else st.session_state['ai_result_en']
+    
+    pdf_data = generate_pdf_report(
+        st.session_state['ac_type'],
+        st.session_state['kasus_baru'],
+        st.session_state['selected_ata'],
+        selected_ai_text,
+        st.session_state['history_match'],
+        lang=lang_code
+    )
+    
+    with col_pdf2:
+        st.write("")
+        st.download_button(
+            label=f"📥 Download Laporan ({pdf_lang})",
+            data=pdf_data,
+            file_name=f"Reliability_Report_{st.session_state['ac_type']}_{lang_code.upper()}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+            mime="application/pdf",
+            type="primary"
+        )
+    
+    st.subheader(f"🔍 Riwayat Defect Terkait - Database {st.session_state['ac_type']} ({len(st.session_state['history_match'])} Record Ditemukan):")
+    st.dataframe(st.session_state['history_match'], use_container_width=True)
