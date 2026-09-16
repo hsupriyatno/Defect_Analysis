@@ -5,7 +5,9 @@ import io
 import html
 from datetime import datetime
 from google import genai
-
+import streamlit as st
+from google import genai
+from google.genai import types
 # Import modul ReportLab untuk PDF
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
@@ -42,19 +44,25 @@ def call_gemini_api(prompt_text):
     Memanggil Gemini API menggunakan SDK resmi google-genai dengan model gemini-3.6-flash.
     """
 def call_gemini_api(prompt_text):
-    """
-    Memanggil Gemini API menggunakan SDK resmi google-genai dengan model gemini-3.6-flash.
-    """
-    api_key = ""
-    try:
-        # Panggil nama key-nya "GEMINI_API_KEY", bukan nilainya
-        if "GEMINI_API_KEY" in st.secrets:
-            api_key = st.secrets["GEMINI_API_KEY"]
-    except Exception as e:
-        pass
-
+    api_key = st.secrets.get("GEMINI_API_KEY", "")
     if not api_key:
         raise ValueError("API Key tidak ditemukan di Streamlit Secrets.")
+
+    clean_api_key = str(api_key).strip().strip('"').strip("'")
+
+    # Paksa penggunaan header x-goog-api-key agar tidak terdeteksi sebagai Bearer/OAuth Token
+    client = genai.Client(
+        api_key=clean_api_key,
+        http_options=types.HttpOptions(
+            headers={"x-goog-api-key": clean_api_key}
+        )
+    )
+
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=prompt_text,
+    )
+    return response.text
 
     # Bersihkan string key dari spasi atau tanda kutip
     clean_api_key = str(api_key).strip().strip('"').strip("'")
