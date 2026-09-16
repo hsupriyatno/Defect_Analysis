@@ -34,10 +34,12 @@ st.sidebar.info(
 # ---------------------------------------------------------
 # FUNGSI PEMANGGILAN GEMINI API (MENGGUNAKAN STREAMLIT SECRETS)
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# FUNGSI PEMANGGILAN GEMINI API (MENGGUNAKAN STREAMLIT SECRETS)
+# ---------------------------------------------------------
 def call_gemini_api(prompt_text):
     """
     Memanggil Gemini API menggunakan SDK resmi google-genai dengan model gemini-3.6-flash.
-    API Key diambil otomatis dari Streamlit Secrets (st.secrets).
     """
     api_key = ""
     try:
@@ -47,9 +49,15 @@ def call_gemini_api(prompt_text):
         pass
 
     if not api_key:
-        raise ValueError("API Key tidak ditemukan. Pastikan 'GEMINI_API_KEY' sudah dikonfigurasi pada menu Secrets di Streamlit Cloud atau .streamlit/secrets.toml.")
+        raise ValueError("API Key tidak ditemukan di Streamlit Secrets.")
+
+    # Bersihkan API Key dari spasi, baris baru, atau karakter kutip tak sengaja
+    clean_api_key = str(api_key).strip().strip('"').strip("'")
+
+    if not clean_api_key.startswith("AIzaSy"):
+        raise ValueError("Format API Key tidak valid. Google Gemini API Key umumnya diawali dengan 'AIzaSy...'. Mohon periksa kembali Secrets Anda.")
         
-    client = genai.Client(api_key=api_key.strip())
+    client = genai.Client(api_key=clean_api_key)
     response = client.models.generate_content(
         model='gemini-3.6-flash',
         contents=prompt_text,
