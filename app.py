@@ -5,9 +5,7 @@ import io
 import html
 from datetime import datetime
 from google import genai
-import streamlit as st
-from google import genai
-from google.genai import types
+
 # Import modul ReportLab untuk PDF
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
@@ -24,9 +22,16 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# SIDEBAR
+# SIDEBAR - INPUT API KEY GEMINI
 # ---------------------------------------------------------
-st.sidebar.title("⚙️ AERO-SYNCH Engine")
+st.sidebar.title("⚙️ Pengaturan API")
+api_key_input = st.sidebar.text_input(
+    "Masukkan Gemini API Key:",
+    type="password",
+    help="Dapatkan API Key gratis di https://aistudio.google.com/app/apikey"
+)
+
+st.sidebar.markdown("---")
 st.sidebar.info(
     "**AERO-SYNCH Reliability Module**\n\n"
     "Aplikasi ini menganalisis defect historis armada pesawat "
@@ -34,55 +39,16 @@ st.sidebar.info(
 )
 
 # ---------------------------------------------------------
-# FUNGSI PEMANGGILAN GEMINI API (MENGGUNAKAN STREAMLIT SECRETS)
+# FUNGSI PEMANGGILAN GEMINI API (SDK RESMI)
 # ---------------------------------------------------------
-# ---------------------------------------------------------
-# FUNGSI PEMANGGILAN GEMINI API (MENGGUNAKAN STREAMLIT SECRETS)
-# ---------------------------------------------------------
-def call_gemini_api(prompt_text):
+def call_gemini_api(prompt_text, api_key):
     """
-    Memanggil Gemini API menggunakan SDK resmi google-genai dengan model gemini-3.6-flash.
+    Memanggil Gemini API menggunakan SDK resmi google-genai.
     """
-def call_gemini_api(prompt_text):
-    api_key = st.secrets.get("GEMINI_API_KEY", "")
-    if not api_key:
-        raise ValueError("API Key tidak ditemukan di Streamlit Secrets.")
-
-    clean_api_key = str(api_key).strip().strip('"').strip("'")
-
-    # Paksa penggunaan header x-goog-api-key agar tidak terdeteksi sebagai Bearer/OAuth Token
-    client = genai.Client(
-        api_key=clean_api_key,
-        http_options=types.HttpOptions(
-            headers={"x-goog-api-key": clean_api_key}
-        )
-    )
-
-    response = client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=prompt_text,
-    )
-    return response.text
-
-    # Bersihkan string key dari spasi atau tanda kutip
-    clean_api_key = str(api_key).strip().strip('"').strip("'")
-
-    client = genai.Client(api_key=clean_api_key)
-    response = client.models.generate_content(
-        model='gemini-3.6-flash',
-        contents=prompt_text,
-    )
-    return response.text
-    if not api_key:
-        raise ValueError("API Key tidak ditemukan di Streamlit Secrets.")
-
-    # Bersihkan API Key dari spasi, baris baru, atau karakter kutip tak sengaja
-    clean_api_key = str(api_key).strip().strip('"').strip("'")
-
-    if not clean_api_key.startswith("AIzaSy"):
-        raise ValueError("Format API Key tidak valid. Google Gemini API Key umumnya diawali dengan 'AIzaSy...'. Mohon periksa kembali Secrets Anda.")
+    if not api_key.strip():
+        raise ValueError("API Key belum dimasukkan. Silakan isi di sidebar sebelah kiri.")
         
-    client = genai.Client(api_key=clean_api_key)
+    client = genai.Client(api_key=api_key.strip())
     response = client.models.generate_content(
         model='gemini-3.6-flash',
         contents=prompt_text,
@@ -90,18 +56,16 @@ def call_gemini_api(prompt_text):
     return response.text
 
 # ---------------------------------------------------------
-# MEMBACA DATABASE EXCEL BERDASARKAN SHEET (SAFE LOAD)
+# MEMBACA DATABASE EXCEL BERDASARKAN SHEET
 # ---------------------------------------------------------
+@st.cache_data
 def load_defect_db_by_sheet(sheet_name):
     try:
         df = pd.read_excel("defect_database.xlsx", sheet_name=sheet_name)
-        return df, None
-    except FileNotFoundError:
-        return pd.DataFrame(), "File 'defect_database.xlsx' tidak ditemukan di root direktori."
-    except ValueError:
-        return pd.DataFrame(), f"Sheet '{sheet_name}' tidak ditemukan di dalam file 'defect_database.xlsx'."
+        return df
     except Exception as e:
-        return pd.DataFrame(), f"Gagal membaca database: {str(e)}"
+        st.error(f"Gagal membaca sheet '{sheet_name}' pada file Excel. Pastikan file 'defect_database.xlsx' ada di root direktori.")
+        return pd.DataFrame()
 
 # ---------------------------------------------------------
 # FUNGSI PENGOLAH TEKS & FISHBONE DIAGRAM UNTUK PDF
@@ -299,12 +263,11 @@ kasus_baru = st.text_area(
 )
 
 if st.button("Analisis Kasus & History", type="primary"):
-    if kasus_baru.strip():
-        df_defect, err_msg = load_defect_db_by_sheet(ac_type)
+    if not api_key_input.strip():
+        st.error("⚠️ Silakan masukkan Gemini API Key Anda pada menu Sidebar di sebelah kiri terlebih dahulu.")
+    elif kasus_baru.strip():
+        df_defect = load_defect_db_by_sheet(ac_type)
         
-        if err_msg:
-            st.warning(f"⚠️ {err_msg}. Analisis AI akan tetap berjalan tanpa histori database.")
-
         if not df_defect.empty:
             stop_words = {
                 "FOUND", "DURING", "PRE", "FLIGHT", "AFTER", "IN", "AT", "ON", "AND", 
@@ -353,18 +316,13 @@ if st.button("Analisis Kasus & History", type="primary"):
                 jumlah_match = 0
                 date_range_info = "N/A"
                 df_history_sorted = pd.DataFrame()
-        else:
-            context_history = "Database tidak tersedia."
-            jumlah_match = 0
-            date_range_info = "N/A"
-            df_history_sorted = pd.DataFrame()
 
-        st.session_state['ac_type'] = ac_type
-        st.session_state['kasus_baru'] = kasus_baru
-        st.session_state['selected_ata'] = selected_ata
-        st.session_state['history_match'] = df_history_sorted
+            st.session_state['ac_type'] = ac_type
+            st.session_state['kasus_baru'] = kasus_baru
+            st.session_state['selected_ata'] = selected_ata
+            st.session_state['history_match'] = df_history_sorted
 
-        prompt = f"""
+            prompt = f"""
 Anda adalah seorang pakar Reliability Engineering penerbangan spesialis armada {ac_type}.
 
 TIPE PESAWAT: {ac_type}
@@ -392,24 +350,24 @@ Berikan analisis teknis lengkap yang terfokus pada sistem/komponen tipe pesawat 
 Provide the exact same technical analysis translated into professional aviation engineering English specifically for {ac_type}.
 """
 
-        with st.spinner(f"Menganalisis histori armada {ac_type} dan menyusun rekomendasi via Gemini..."):
-            try:
-                full_text = call_gemini_api(prompt)
-            except Exception as e:
-                st.error(f"⚠️ **Gagal terhubung ke Gemini API:** {e}")
-                full_text = ""
+            with st.spinner(f"Menganalisis histori armada {ac_type} dan menyusun rekomendasi via Gemini..."):
+                try:
+                    full_text = call_gemini_api(prompt, api_key_input)
+                except Exception as e:
+                    st.error(f"⚠️ **Gagal terhubung ke Gemini API:** {e}")
+                    full_text = ""
 
-            if full_text:
-                if "[BAGIAN ENGLISH]" in full_text:
-                    parts = full_text.split("[BAGIAN ENGLISH]")
-                    text_id = parts[0].replace("[BAGIAN INDONESIA]", "").strip()
-                    text_en = parts[1].strip()
-                else:
-                    text_id = full_text
-                    text_en = full_text
+                if full_text:
+                    if "[BAGIAN ENGLISH]" in full_text:
+                        parts = full_text.split("[BAGIAN ENGLISH]")
+                        text_id = parts[0].replace("[BAGIAN INDONESIA]", "").strip()
+                        text_en = parts[1].strip()
+                    else:
+                        text_id = full_text
+                        text_en = full_text
 
-                st.session_state['ai_result_id'] = text_id
-                st.session_state['ai_result_en'] = text_en
+                    st.session_state['ai_result_id'] = text_id
+                    st.session_state['ai_result_en'] = text_en
 
     else:
         st.warning("Mohon masukkan deskripsi defect terlebih dahulu.")
