@@ -61,7 +61,7 @@ def call_gemini_api(prompt_text, user_api_key=""):
 
     clean_api_key = str(api_key).strip().strip('"').strip("'")
 
-    # 2. EndPoint REST API Gemini (Gemini 2.5 Flash)
+    # 2. EndPoint REST API Gemini (Gemini 3.6 Flash)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_api_key}"
     
     headers = {
