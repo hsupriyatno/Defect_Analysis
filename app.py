@@ -48,9 +48,10 @@ st.sidebar.info(
 # ---------------------------------------------------------
 def call_gemini_api(prompt_text, user_api_key=""):
     """
-    Memanggil Gemini API via REST HTTP Request.
+    Memanggil Gemini API via REST HTTP Request dengan mengabaikan 
+    pemeriksaan SDK dan mengirim API Key via Header x-goog-api-key.
     """
-    # 1. Ambil API Key dari input pengguna atau dari Streamlit Secrets
+    # 1. Ambil API Key dari input sidebar atau Streamlit Secrets
     api_key = user_api_key.strip() if user_api_key else ""
     
     if not api_key:
@@ -65,11 +66,13 @@ def call_gemini_api(prompt_text, user_api_key=""):
 
     clean_api_key = str(api_key).strip().strip('"').strip("'")
 
-    # 2. Endpoint REST API Gemini (Gemini 2.5 Flash)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_api_key}"
+    # 2. Endpoint REST API (Tanpa parameter ?key= di URL)
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
     
+    # 3. Kirim API Key melalui Header x-goog-api-key
     headers = {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "x-goog-api-key": clean_api_key
     }
     
     payload = {
@@ -82,7 +85,7 @@ def call_gemini_api(prompt_text, user_api_key=""):
         ]
     }
 
-    # 3. Eksekusi Request
+    # 4. Eksekusi Request
     response = requests.post(url, headers=headers, json=payload, timeout=60)
     
     if response.status_code != 200:
