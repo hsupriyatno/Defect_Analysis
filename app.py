@@ -48,10 +48,9 @@ st.sidebar.info(
 # ---------------------------------------------------------
 def call_gemini_api(prompt_text, user_api_key=""):
     """
-    Memanggil Gemini API via REST HTTP Request langsung untuk menghindari bug
-    penanganan API Key format baru (AQ.) pada SDK google-genai.
+    Memanggil Gemini API via REST HTTP Request.
     """
-    # 1. Prioritaskan API Key dari Input Sidebar, jika kosong gunakan Streamlit Secrets
+    # 1. Ambil API Key dari input pengguna atau dari Streamlit Secrets
     api_key = user_api_key.strip() if user_api_key else ""
     
     if not api_key:
@@ -62,11 +61,11 @@ def call_gemini_api(prompt_text, user_api_key=""):
             pass
 
     if not api_key:
-        raise ValueError("API Key tidak ditemukan. Silakan masukkan di sidebar atau konfigurasi Streamlit Secrets.")
+        raise ValueError("API Key tidak ditemukan. Silakan masukkan API Key di sidebar atau konfigurasi Streamlit Secrets.")
 
     clean_api_key = str(api_key).strip().strip('"').strip("'")
 
-    # 2. EndPoint REST API Gemini (Gemini 3.6 Flash)
+    # 2. Endpoint REST API Gemini (Gemini 2.5 Flash)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_api_key}"
     
     headers = {
@@ -83,7 +82,7 @@ def call_gemini_api(prompt_text, user_api_key=""):
         ]
     }
 
-    # 3. Eksekusi Request HTTP
+    # 3. Eksekusi Request
     response = requests.post(url, headers=headers, json=payload, timeout=60)
     
     if response.status_code != 200:
@@ -95,7 +94,6 @@ def call_gemini_api(prompt_text, user_api_key=""):
         return res_json['candidates'][0]['content']['parts'][0]['text']
     except (KeyError, IndexError):
         raise ValueError(f"Respon tidak sesuai format: {res_json}")
-
 # ---------------------------------------------------------
 # MEMBACA DATABASE EXCEL BERDASARKAN SHEET
 # ---------------------------------------------------------
