@@ -44,7 +44,7 @@ def call_gemini_api(prompt_text):
     api_key = ""
     try:
         if "GEMINI_API_KEY" in st.secrets:
-            api_key = st.secrets["GEMINI_API_KEY"]
+            api_key = st.secrets["AQ.Ab8RN6Lvbx9oC9XXsBrRknldP7u1a0vfx8RK7ALUqY-uTwN6Qw"]
     except Exception:
         pass
 
