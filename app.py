@@ -41,13 +41,30 @@ def call_gemini_api(prompt_text):
     """
     Memanggil Gemini API menggunakan SDK resmi google-genai dengan model gemini-3.6-flash.
     """
+def call_gemini_api(prompt_text):
+    """
+    Memanggil Gemini API menggunakan SDK resmi google-genai dengan model gemini-3.6-flash.
+    """
     api_key = ""
     try:
+        # Panggil nama key-nya "GEMINI_API_KEY", bukan nilainya
         if "GEMINI_API_KEY" in st.secrets:
-            api_key = st.secrets["AQ.Ab8RN6Lvbx9oC9XXsBrRknldP7u1a0vfx8RK7ALUqY-uTwN6Qw"]
-    except Exception:
+            api_key = st.secrets["GEMINI_API_KEY"]
+    except Exception as e:
         pass
 
+    if not api_key:
+        raise ValueError("API Key tidak ditemukan di Streamlit Secrets.")
+
+    # Bersihkan string key dari spasi atau tanda kutip
+    clean_api_key = str(api_key).strip().strip('"').strip("'")
+
+    client = genai.Client(api_key=clean_api_key)
+    response = client.models.generate_content(
+        model='gemini-3.6-flash',
+        contents=prompt_text,
+    )
+    return response.text
     if not api_key:
         raise ValueError("API Key tidak ditemukan di Streamlit Secrets.")
 
