@@ -280,7 +280,7 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_response_text, df_
 # ---------------------------------------------------------
 # ANTARMUKA UTAMA
 # ---------------------------------------------------------
-st.title("🛠️ AERO-SYNCH: Defect & Reliability Analyzer")
+st.title("🛠️ Defect & Reliability Analyzer")
 st.write("Sistem Analisis Rekayasa Keandalan Penerbangan Berbasis Histori Maintenance & Gemini AI.")
 
 col_ac, col_ata = st.columns([2, 1])
