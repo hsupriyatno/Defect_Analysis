@@ -207,7 +207,7 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_response_text, df_
     )
 
     story.append(Paragraph(labels["title"], title_style))
-    story.append(Paragraph(f"Generated on: {datetime.now().strftime('%d %B %Y, %H:%M WIB')} | System: AERO-SYNCH Engine", subtitle_style))
+    story.append(Paragraph(f"Generated on: {datetime.now().strftime('%d %B %Y, %H:%M WIB')} | System: AIRFAST Indonesia - Defect Analizer", subtitle_style))
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#1E3A8A'), spaceAfter=10))
 
     story.append(Paragraph(labels["sec1"], h2_style))
