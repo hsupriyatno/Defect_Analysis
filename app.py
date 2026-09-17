@@ -21,7 +21,7 @@ from reportlab.lib import colors
 # KONFIGURASI HALAMAN
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="AERO-SYNCH | Defect & Reliability Analyzer",
+    page_title="AIRFAST Indonesia | Defect & Reliability Analyzer",
     page_icon="✈️",
     layout="wide"
 )
@@ -38,7 +38,7 @@ api_key_input = st.sidebar.text_input(
 
 st.sidebar.markdown("---")
 st.sidebar.info(
-    "**AERO-SYNCH Reliability Module**\n\n"
+    "**AIRFAST Indonesia - Reliability Module**\n\n"
     "Aplikasi ini menganalisis defect historis armada pesawat "
     "dan menghasilkan laporan rekayasa keandalan berbasis AI."
 )
