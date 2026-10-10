@@ -105,16 +105,12 @@ def load_defect_db_by_sheet(sheet_name):
         df = pd.read_excel("defect_database.xlsx", sheet_name=sheet_name)
         
         if not df.empty:
-            # Gabungkan kolom yang biasa memuat informasi teks pekerjaan (misal: 'Note / Report', 'Work Order', 'Description', dll.)
-            # Kita buat gabungan string untuk mendeteksi pola scheduled maintenance
+            # Gabungkan kolom untuk mendeteksi pola scheduled maintenance
             combined_text = df.astype(str).agg(' '.join, axis=1).str.upper()
             
             # Pola kata kunci / format Scheduled Maintenance yang ingin DIKELUARKAN (EXCLUDE)
-            # Meliputi pola WO seperti OCK-WO, OCL-WO, DUE LIST, ROUTINE INSPECTION, COMPANY CONVENIENCE
             scheduled_pattern = r'(WO|OCK-WO|OCL-WO|DUE\s*LIST|ROUTINE|INSPECTION|COMPANY\s*CONVENIENCE)'
             
-            # Filter: Hanya ambil baris yang TIDAK mengandung pola scheduled di atas
-            # (tanda tilde '~' artinya NOT / mengecualikan)
             mask_scheduled = combined_text.str.contains(scheduled_pattern, regex=True, na=False)
             df_unscheduled = df[~mask_scheduled].copy()
             
@@ -122,7 +118,8 @@ def load_defect_db_by_sheet(sheet_name):
             
         return df
     except Exception as e:
-        st.error(f"Gagal membaca sheet '{sheet_name}' pada file Excel. Pastikan file 'defect_database.xlsx' ada di root direktori.")
+        # Tampilkan error asli agar kita tahu apakah nama sheet salah atau file terkunci
+        st.error(f"Gagal membaca sheet '{sheet_name}'. Detail error: {str(e)}")
         return pd.DataFrame()
 
 # ---------------------------------------------------------
