@@ -105,8 +105,8 @@ def load_defect_db_by_sheet(sheet_name):
         df = pd.read_excel("defect_database.xlsx", sheet_name=sheet_name)
         
         if not df.empty:
-            # Gabungkan kolom untuk mendeteksi pola scheduled maintenance
-            combined_text = df.astype(str).agg(' '.join, axis=1).str.upper()
+            # Mengubah setiap sel menjadi string dengan aman untuk menghindari error tipe data float/NaN
+            combined_text = df.astype(object).fillna('').astype(str).agg(' '.join, axis=1).str.upper()
             
             # Pola kata kunci / format Scheduled Maintenance yang ingin DIKELUARKAN (EXCLUDE)
             scheduled_pattern = r'(WO|OCK-WO|OCL-WO|DUE\s*LIST|ROUTINE|INSPECTION|COMPANY\s*CONVENIENCE)'
@@ -118,10 +118,8 @@ def load_defect_db_by_sheet(sheet_name):
             
         return df
     except Exception as e:
-        # Tampilkan error asli agar kita tahu apakah nama sheet salah atau file terkunci
         st.error(f"Gagal membaca sheet '{sheet_name}'. Detail error: {str(e)}")
         return pd.DataFrame()
-
 # ---------------------------------------------------------
 # FUNGSI PENGOLAH TEKS & FISHBONE DIAGRAM UNTUK PDF
 # ---------------------------------------------------------
