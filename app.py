@@ -378,7 +378,7 @@ if st.button("Analisis Kasus & History", type="primary"):
             st.session_state['selected_ata'] = selected_ata
             st.session_state['history_match'] = df_history_sorted
 
-            prompt = f"""
+prompt = f"""
 Anda adalah seorang pakar Reliability Engineering penerbangan spesialis armada {ac_type}.
 
 TIPE PESAWAT: {ac_type}
@@ -400,10 +400,10 @@ Berikan analisis teknis lengkap yang terfokus pada sistem/komponen tipe pesawat 
 2. ANALISIS REPETITIVE DEFECT & RCA: Analisis indikasi repetitive defect (berdasarkan {jumlah_match} kejadian) dan Root Cause Analysis (RCA) spesifik untuk {ac_type}:
    - Sertakan Diagram Fishbone / Ishikawa sederhana di dalam block code (menggunakan tanda triple backtick ``` ).
    - Gunakan karakter ASCII standar (huruf, spasi, hyphens, plus, pipa).
-3. REKOMENDASI KOREKTIF: Rekomendasi langkah troubleshooting / Corrective Action (IAW AMM/WDM {ac_type}).
+3. REKOMENDASI KOREKTIF & PREVENTIF: Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type}), serta **Operational Special Test / Test Flight Monitoring** yang ketat (misalnya prosedur uji fungsional, kalibrasi, pengujian terintegrasi, hingga pemantauan khusus pada penerbangan komersial berikutnya sebelum status observasi maintenance dilepas).
 
 [BAGIAN ENGLISH]
-Provide the exact same technical analysis translated into professional aviation engineering English specifically for {ac_type}, maintaining the same 4 structured sections (System Description, Defect Analysis & RCA, Corrective Recommendations).
+Provide the exact same technical analysis translated into professional aviation engineering English specifically for {ac_type}, maintaining the same 4 structured sections (System Description, Defect Analysis & RCA, Corrective & Preventive Recommendations including Special Test and Flight Monitoring).
 """
 
             with st.spinner(f"Menganalisis histori armada {ac_type} dan menyusun rekomendasi via Gemini..."):
