@@ -171,13 +171,14 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_response_text, df_
     story = []
     styles = getSampleStyleSheet()
 
-    labels = {
+labels = {
         "id": {
             "title": "LAPORAN EVALUASI KEANDALAN TEKNIS",
             "sec1": "1. INFORMASI DEFECT YANG DILAPORKAN",
             "sec2": "2. SYSTEM DESCRIPTION & PRINSIP KERJA",
-            "sec3": "3. ANALISIS REKAYASA & REKOMENDASI (AI)",
-            "sec4": f"4. RIWAYAT UNSCHEDULED DEFECT DALAM DATABASE ({len(df_history)} Record)",
+            "sec3": "3. REPETITIVE DEFECT ANALYSIS & ROOT CAUSE ANALYSIS (RCA)",
+            "sec4": "4. CORRECTIVE & PREVENTIVE RECOMMENDATIONS",
+            "sec5": f"5. LATEST HISTORICAL MATCHES IN DATABASE ({len(df_history)} Record Ditemukan)",
             "ac_label": "Aircraft Type:",
             "defect_label": "Defect Dilaporkan:",
             "ata_label": "ATA Chapter:",
@@ -187,8 +188,9 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_response_text, df_
             "title": "TECHNICAL RELIABILITY EVALUATION REPORT",
             "sec1": "1. REPORTED DEFECT INFORMATION",
             "sec2": "2. SYSTEM DESCRIPTION & OPERATIONAL PRINCIPLES",
-            "sec3": "3. ENGINEERING ANALYSIS & RECOMMENDATIONS",
-            "sec4": f"4. LATEST UNSCHEDULED MATCHES IN DATABASE ({len(df_history)} Records)",
+            "sec3": "3. REPETITIVE DEFECT ANALYSIS & ROOT CAUSE ANALYSIS (RCA)",
+            "sec4": "4. CORRECTIVE & PREVENTIVE RECOMMENDATIONS",
+            "sec5": f"5. LATEST HISTORICAL MATCHES IN DATABASE ({len(df_history)} Records Found)",
             "ac_label": "Aircraft Type:",
             "defect_label": "Reported Defect:",
             "ata_label": "ATA Chapter:",
@@ -206,7 +208,7 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_response_text, df_
     )
     h2_style = ParagraphStyle(
         'SectionHeader', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=11, leading=14,
-        textColor=colors.HexColor('#1E3A8A'), spaceBefore=10, spaceAfter=6
+        textColor=colors.HexColor('#1E3A8A'), spaceBefore=12, spaceAfter=6
     )
     body_style = ParagraphStyle(
         'BodyDark', parent=styles['Normal'], fontName='Helvetica', fontSize=10, leading=14,
