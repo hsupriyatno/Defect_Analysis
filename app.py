@@ -432,7 +432,7 @@ Provide the exact same technical analysis translated into professional aviation 
                     st.error(f"⚠️ **Gagal terhubung ke Gemini API:** {e}")
                     full_text = ""
 
-if full_text:
+    if full_text:
                     # Pisahkan Bahasa Indonesia dan Bahasa Inggris terlebih dahulu
                     if "[BAGIAN ENGLISH]" in full_text:
                         id_part = full_text.split("[BAGIAN ENGLISH]")[0]
