@@ -171,7 +171,7 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_response_text, df_
     story = []
     styles = getSampleStyleSheet()
 
-labels = {
+    labels = {
         "id": {
             "title": "LAPORAN EVALUASI KEANDALAN TEKNIS",
             "sec1": "1. INFORMASI DEFECT YANG DILAPORKAN",
