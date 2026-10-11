@@ -378,7 +378,7 @@ if st.button("Analisis Kasus & History", type="primary"):
             st.session_state['selected_ata'] = selected_ata
             st.session_state['history_match'] = df_history_sorted
 
-prompt = f"""
+            prompt = f"""
 Anda adalah seorang pakar Reliability Engineering penerbangan spesialis armada {ac_type}.
 
 TIPE PESAWAT: {ac_type}
