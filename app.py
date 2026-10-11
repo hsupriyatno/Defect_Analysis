@@ -408,21 +408,29 @@ SAMPEL 15 RECORD TERAKHIR DARI DATABASE UNSCHEDULED ARMADA {ac_type}:
 {context_history}
 
 TUGAS ANDA:
-Berikan analisis teknis lengkap yang terfokus pada sistem/komponen tipe pesawat {ac_type} dalam format berikut (dalam Bahasa Indonesia):
+Berikan analisis teknis lengkap dalam Bahasa Indonesia dengan format persis berikut (TANPA menuliskan nomor bab karena sudah disediakan oleh sistem, tulis langsung sub-judul teksnya saja):
 
-[BAGIAN SYSTEM]
-1. SYSTEM DESCRIPTION: Jelaskan secara ringkas prinsip kerja, fungsi utama, dan arsitektur sistem/komponen terkait pada armada {ac_type} agar pembaca memiliki pemahaman awal yang baik.
+[BAHASA_INDONESIA]
+[SYSTEM]
+Jelaskan secara ringkas prinsip kerja, fungsi utama, dan arsitektur sistem/komponen terkait pada armada {ac_type} agar pembaca memiliki pemahaman awal yang baik.
 
-[BAGIAN RCA]
-2. REPETITIVE DEFECT & RCA: Analisis indikasi repetitive defect (berdasarkan {jumlah_match} kejadian) dan Root Cause Analysis (RCA) spesifik untuk {ac_type}:
-   - Sertakan Diagram Fishbone / Ishikawa sederhana di dalam block code (menggunakan tanda triple backtick ``` ).
-   - Gunakan karakter ASCII standar (huruf, spasi, hyphens, plus, pipa).
+[RCA]
+Analisis indikasi repetitive defect (berdasarkan {jumlah_match} kejadian) dan Root Cause Analysis (RCA) spesifik untuk {ac_type}:
+- Sertakan Diagram Fishbone / Ishikawa sederhana di dalam block code (menggunakan tanda triple backtick ``` ).
+- Gunakan karakter ASCII standar (huruf, spasi, hyphens, plus, pipa).
 
-[BAGIAN REKOMENDASI]
-3. CORRECTIVE & PREVENTIVE RECOMMENDATIONS: Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type}), serta **Operational Special Test / Test Flight Monitoring** yang ketat sebelum status observasi maintenance dilepas.
+[RECOMMENDATIONS]
+Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type}), serta Operational Special Test / Test Flight Monitoring yang ketat sebelum status observasi maintenance dilepas.
 
-[BAGIAN ENGLISH]
-Provide the exact same technical analysis translated into professional aviation engineering English specifically for {ac_type}, maintaining the exact same structured sections ([BAGIAN SYSTEM], [BAGIAN RCA], [BAGIAN REKOMENDASI]).
+[BAHASA_INGGRIS]
+[SYSTEM]
+(Provide the exact same System Description translated into professional aviation engineering English for {ac_type})
+
+[RCA]
+(Provide the exact same Repetitive Defect & RCA analysis translated into professional aviation engineering English for {ac_type})
+
+[RECOMMENDATIONS]
+(Provide the exact same Corrective & Preventive Recommendations translated into professional aviation engineering English for {ac_type})
 """
 
             with st.spinner(f"Menganalisis histori armada {ac_type} dan menyusun rekomendasi via Gemini..."):
@@ -433,42 +441,44 @@ Provide the exact same technical analysis translated into professional aviation 
                     full_text = ""
 
                 if full_text:
-                    # Pisahkan Bahasa Indonesia dan Bahasa Inggris terlebih dahulu
-                    if "[BAGIAN ENGLISH]" in full_text:
-                        id_part = full_text.split("[BAGIAN ENGLISH]")[0]
-                        en_part = full_text.split("[BAGIAN ENGLISH]")[1]
-                    else:
-                        id_part = full_text
-                        en_part = full_text
-
-                    # Parsing Sub-bagian Bahasa Indonesia
-                    text_id_sys = ""
-                    text_id_rca = ""
-                    text_id_rec = ""
-                    
-                    # Parsing Sub-bagian Bahasa Inggris
-                    text_en_sys = ""
-                    text_en_rca = ""
-                    text_en_rec = ""
+                    # Inisialisasi variabel
+                    text_id_sys, text_id_rca, text_id_rec = "", "", ""
+                    text_en_sys, text_en_rca, text_en_rec = "", "", ""
 
                     try:
-                        # Split ID parts
-                        parts_id = id_part.split("[BAGIAN RCA]")
-                        text_id_sys = parts_id[0].replace("[BAGIAN SYSTEM]", "").strip()
-                        sub_id = parts_id[1].split("[BAGIAN REKOMENDASI]")
-                        text_id_rca = sub_id[0].strip()
-                        text_id_rec = sub_id[1].strip()
+                        # Pisahkan berdasarkan bahasa
+                        if "[BAHASA_INGGRIS]" in full_text:
+                            parts_lang = full_text.split("[BAHASA_INGGRIS]")
+                            id_block = parts_lang[0]
+                            en_block = parts_lang[1]
+                        else:
+                            id_block = full_text
+                            en_block = full_text
 
-                        # Split EN parts
-                        parts_en = en_part.split("[BAGIAN RCA]")
-                        text_en_sys = parts_en[0].replace("[BAGIAN SYSTEM]", "").strip()
-                        sub_en = parts_en[1].split("[BAGIAN REKOMENDASI]")
-                        text_en_rca = sub_en[0].strip()
-                        text_en_rec = sub_en[1].strip()
-                    except Exception:
-                        # Fallback jika format meleset
-                        text_id_sys = id_part
-                        text_en_sys = en_part
+                        # Parse Blok Bahasa Indonesia
+                        if "[SYSTEM]" in id_block and "[RCA]" in id_block and "[RECOMMENDATIONS]" in id_block:
+                            sys_split = id_block.split("[SYSTEM]")[1].split("[RCA]")
+                            text_id_sys = sys_split[0].strip()
+                            rca_split = sys_split[1].split("[RECOMMENDATIONS]")
+                            text_id_rca = rca_split[0].strip()
+                            text_id_rec = rca_split[1].strip()
+                        else:
+                            text_id_sys = id_block
+
+                        # Parse Blok Bahasa Inggris
+                        if "[SYSTEM]" in en_block and "[RCA]" in en_block and "[RECOMMENDATIONS]" in en_block:
+                            sys_split_en = en_block.split("[SYSTEM]")[1].split("[RCA]")
+                            text_en_sys = sys_split_en[0].strip()
+                            rca_split_en = sys_split_en[1].split("[RECOMMENDATIONS]")
+                            text_en_rca = rca_split_en[0].strip()
+                            text_en_rec = rca_split_en[1].strip()
+                        else:
+                            text_en_sys = en_block
+
+                    except Exception as parse_err:
+                        # Fallback jika terjadi pergeseran format
+                        text_id_sys = full_text
+                        text_en_sys = full_text
 
                     # Simpan ke session state
                     st.session_state['ai_sys_id'] = text_id_sys
@@ -484,28 +494,53 @@ Provide the exact same technical analysis translated into professional aviation 
 # ---------------------------------------------------------
 # HASIL DAN DOWNLOAD REPORT
 # ---------------------------------------------------------
-if 'ai_result_id' in st.session_state:
-    st.subheader(f"📋 Hasil Analisis AI ({st.session_state['ac_type']})")
-    st.write(st.session_state['ai_result_id'])
+if 'ai_sys_id' in st.session_state:
+    st.subheader(f"📋 Hasil Analisis AI & Evaluasi Keandalan ({st.session_state['ac_type']})")
+    
+    # 1. Tampilkan Bagian 1: Informasi Defect yang Dilaporkan
+    st.markdown("### 1. INFORMASI DEFECT YANG DILAPORKAN")
+    st.info(f"**Aircraft Type:** {st.session_state.get('ac_type')}\n\n**ATA Chapter:** {st.session_state.get('selected_ata', 'N/A')}\n\n**Defect / Kasus Dilaporkan:**\n{st.session_state.get('kasus_baru')}")
+    
+    # 2. Tampilkan Bagian 2: System Description
+    st.markdown("### 2. SYSTEM DESCRIPTION & OPERATIONAL PRINCIPLES")
+    st.write(st.session_state.get('ai_sys_id', ''))
+    
+    # 3. Tampilkan Bagian 3: RCA
+    st.markdown("### 3. REPETITIVE DEFECT ANALYSIS & ROOT CAUSE ANALYSIS (RCA)")
+    st.write(st.session_state.get('ai_rca_id', ''))
+    
+    # 4. Tampilkan Bagian 4: Recommendations
+    st.markdown("### 4. CORRECTIVE & PREVENTIVE RECOMMENDATIONS")
+    st.write(st.session_state.get('ai_rec_id', ''))
     
     st.divider()
     
+    # Bagian Pilihan Bahasa & Tombol Download PDF
     col_pdf1, col_pdf2 = st.columns([2, 2])
     with col_pdf1:
         pdf_lang = st.radio(
             "🌐 Pilih Bahasa Laporan PDF:",
             options=["Bahasa Indonesia", "English"],
-            horizontal=True
+            horizontal=True,
+            key="pdf_lang_radio"
         )
     
     lang_code = "id" if pdf_lang == "Bahasa Indonesia" else "en"
-    selected_ai_text = st.session_state['ai_result_id'] if lang_code == "id" else st.session_state['ai_result_en']
+    
+    if lang_code == "id":
+        ai_sys = st.session_state.get('ai_sys_id', '')
+        ai_rca = st.session_state.get('ai_rca_id', '')
+        ai_rec = st.session_state.get('ai_rec_id', '')
+    else:
+        ai_sys = st.session_state.get('ai_sys_en', '')
+        ai_rca = st.session_state.get('ai_rca_en', '')
+        ai_rec = st.session_state.get('ai_rec_en', '')
     
     pdf_data = generate_pdf_report(
         st.session_state['ac_type'],
         st.session_state['kasus_baru'],
         st.session_state['selected_ata'],
-        selected_ai_text,
+        ai_sys, ai_rca, ai_rec,
         st.session_state['history_match'],
         lang=lang_code
     )
@@ -520,5 +555,6 @@ if 'ai_result_id' in st.session_state:
             type="primary"
         )
     
-    st.subheader(f"🔍 Riwayat Defect Terkait - Database {st.session_state['ac_type']} ({len(st.session_state['history_match'])} Record Ditemukan):")
+    # 5. Tampilkan Bagian 5: Historical Record (Tabel Database Unscheduled)
+    st.subheader(f"5. HISTORICAL RECORD (Database Unscheduled {st.session_state['ac_type']} - {len(st.session_state['history_match'])} Record Ditemukan):")
     st.dataframe(st.session_state['history_match'], use_container_width=True)
