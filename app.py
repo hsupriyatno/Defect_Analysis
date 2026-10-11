@@ -120,6 +120,7 @@ def load_defect_db_by_sheet(sheet_name):
     except Exception as e:
         st.error(f"Gagal membaca sheet '{sheet_name}'. Detail error: {str(e)}")
         return pd.DataFrame()
+
 # ---------------------------------------------------------
 # FUNGSI PENGOLAH TEKS & FISHBONE DIAGRAM UNTUK PDF
 # ---------------------------------------------------------
@@ -174,8 +175,9 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_response_text, df_
         "id": {
             "title": "LAPORAN EVALUASI KEANDALAN TEKNIS",
             "sec1": "1. INFORMASI DEFECT YANG DILAPORKAN",
-            "sec2": "2. ANALISIS REKAYASA & REKOMENDASI (AI)",
-            "sec3": f"3. RIWAYAT DEFECT TERAKHIR DALAM DATABASE ({len(df_history)} Record Ditemukan)",
+            "sec2": "2. SYSTEM DESCRIPTION & PRINSIP KERJA",
+            "sec3": "3. ANALISIS REKAYASA & REKOMENDASI (AI)",
+            "sec4": f"4. RIWAYAT UNSCHEDULED DEFECT DALAM DATABASE ({len(df_history)} Record)",
             "ac_label": "Aircraft Type:",
             "defect_label": "Defect Dilaporkan:",
             "ata_label": "ATA Chapter:",
@@ -184,8 +186,9 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_response_text, df_
         "en": {
             "title": "TECHNICAL RELIABILITY EVALUATION REPORT",
             "sec1": "1. REPORTED DEFECT INFORMATION",
-            "sec2": "2. ENGINEERING ANALYSIS & RECOMMENDATIONS",
-            "sec3": f"3. LATEST HISTORICAL MATCHES IN DATABASE ({len(df_history)} Records Found)",
+            "sec2": "2. SYSTEM DESCRIPTION & OPERATIONAL PRINCIPLES",
+            "sec3": "3. ENGINEERING ANALYSIS & RECOMMENDATIONS",
+            "sec4": f"4. LATEST UNSCHEDULED MATCHES IN DATABASE ({len(df_history)} Records)",
             "ac_label": "Aircraft Type:",
             "defect_label": "Reported Defect:",
             "ata_label": "ATA Chapter:",
@@ -375,32 +378,32 @@ if st.button("Analisis Kasus & History", type="primary"):
             st.session_state['selected_ata'] = selected_ata
             st.session_state['history_match'] = df_history_sorted
 
-            prompt = f"""
+prompt = f"""
 Anda adalah seorang pakar Reliability Engineering penerbangan spesialis armada {ac_type}.
 
 TIPE PESAWAT: {ac_type}
 KASUS BARU YANG DILAPORKAN:
 {kasus_baru} (ATA Chapter: {selected_ata if selected_ata else 'N/A'})
 
-DATA HISTORI DARI DATABASE ARMADA {ac_type}:
+DATA HISTORI DARI DATABASE UNSCHEDULED ARMADA {ac_type}:
 - Total Ditemukan: {jumlah_match} record/kejadian defect serupa.
 - Periode Waktu Kejadian: {date_range_info}
 
-SAMPEL 15 RECORD TERAKHIR DARI DATABASE ARMADA {ac_type}:
+SAMPEL 15 RECORD TERAKHIR DARI DATABASE UNSCHEDULED ARMADA {ac_type}:
 {context_history}
 
 TUGAS ANDA:
-Berikan analisis teknis lengkap yang terfokus pada sistem/komponen tipe pesawat {ac_type} dalam 2 BAGIAN EKSPLISIT:
+Berikan analisis teknis lengkap yang terfokus pada sistem/komponen tipe pesawat {ac_type} dalam 4 BAGIAN EKSPLISIT BERIKUT (dalam Bahasa Indonesia):
 
 [BAGIAN INDONESIA]
-1. Analisis Indikasi Repetitive Defect (gunakan data total {jumlah_match} kejadian dalam periode {date_range_info} untuk tipe {ac_type}).
-2. Root Cause Analysis (RCA) spesifik untuk {ac_type}:
+1. SYSTEM DESCRIPTION: Jelaskan secara ringkas prinsip kerja, fungsi utama, dan arsitektur sistem/komponen terkait pada armada {ac_type} agar pembaca memiliki pemahaman awal yang baik.
+2. ANALISIS REPETITIVE DEFECT & RCA: Analisis indikasi repetitive defect (berdasarkan {jumlah_match} kejadian) dan Root Cause Analysis (RCA) spesifik untuk {ac_type}:
    - Sertakan Diagram Fishbone / Ishikawa sederhana di dalam block code (menggunakan tanda triple backtick ``` ).
-   - PENTING: Gunakan karakter ASCII standar seperti huruf, spasi, hyphens (-), plus (+), dan pipa (|). JANGAN gunakan karakter unicode khusus atau balok tebal.
-3. Rekomendasi Langkah Troubleshooting / Corrective Action (IAW AMM/WDM {ac_type}).
+   - Gunakan karakter ASCII standar (huruf, spasi, hyphens, plus, pipa).
+3. REKOMENDASI KOREKTIF: Rekomendasi langkah troubleshooting / Corrective Action (IAW AMM/WDM {ac_type}).
 
 [BAGIAN ENGLISH]
-Provide the exact same technical analysis translated into professional aviation engineering English specifically for {ac_type}.
+Provide the exact same technical analysis translated into professional aviation engineering English specifically for {ac_type}, maintaining the same 4 structured sections (System Description, Defect Analysis & RCA, Corrective Recommendations).
 """
 
             with st.spinner(f"Menganalisis histori armada {ac_type} dan menyusun rekomendasi via Gemini..."):
