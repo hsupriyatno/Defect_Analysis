@@ -416,7 +416,21 @@ if st.button("Analisis Kasus & History", type="primary"):
             st.session_state['selected_ata'] = selected_ata
             st.session_state['history_match'] = df_history_sorted
 
-            prompt = f"""
+prompt = f"""
+# Tentukan metode analisis secara otomatis berdasarkan jumlah histori (jumlah_match)
+if jumlah_match >= 5:
+    selected_method_instruction = """
+    [METODE ANALISIS YANG WAJIB DIGUNAKAN: FISHBONE / ISHIKAWA DIAGRAM]
+    Karena kasus ini memiliki riwayat repetitif yang cukup tinggi (>= 5 kejadian), buatlah analisis Root Cause Analysis (RCA) menggunakan Diagram Fishbone / Ishikawa sederhana di dalam block code (menggunakan tanda triple backtick ``` ) dengan mengkategorikan penyebab ke dalam: Manpower, Machine/LRU, Material/Hardware, Method, dan Environment.
+    """
+else:
+    selected_method_instruction = """
+    [METODE ANALISIS YANG WAJIB DIGUNAKAN: 5 WHYS INVESTIGATION]
+    Karena kasus ini memiliki sedikit atau bahkan belum ada riwayat sebelumnya (kejadian terisolasi/spesifik), lakukan investigasi Root Cause Analysis (RCA) menggunakan metode penelusuran "5 Whys" (bertanya "Mengapa" sebanyak 5 tahapan secara berurutan mulai dari gejala permukaan hingga menemukan akar penyebab tunggal yang paling mendalam).
+    """
+
+# Masukkan instruksi dinamis tersebut ke dalam prompt utama Gemini
+prompt = f"""
 Anda adalah seorang pakar Reliability Engineering penerbangan spesialis armada {ac_type}.
 
 TIPE PESAWAT: {ac_type}
@@ -427,35 +441,33 @@ DATA HISTORI DARI DATABASE UNSCHEDULED ARMADA {ac_type}:
 - Total Ditemukan: {jumlah_match} record/kejadian defect serupa.
 - Periode Waktu Kejadian: {date_range_info}
 
-SAMPEL 15 RECORD TERAKHIR DARI DATABASE UNSCHEDULED ARMADA {ac_type}:
+SAMPEL RECORD TERAKHIR DARI DATABASE UNSCHEDULED ARMADA {ac_type}:
 {context_history}
 
 TUGAS ANDA:
-Berikan analisis teknis lengkap dalam Bahasa Indonesia dengan format persis berikut (TANPA menuliskan nomor bab karena sudah disediakan oleh sistem, tulis langsung sub-judul teksnya saja):
+Berikan analisis teknis lengkap dalam Bahasa Indonesia dengan format persis berikut:
 
 [BAHASA_INDONESIA]
 [SYSTEM]
-Jelaskan secara ringkas prinsip kerja, fungsi utama, dan arsitektur sistem/komponen terkait pada armada {ac_type} agar pembaca memiliki pemahaman awal yang baik.
+Jelaskan secara ringkas prinsip kerja, fungsi utama, dan arsitektur sistem/komponen terkait pada armada {ac_type}.
 
 [RCA]
-Analisis indikasi repetitive defect (berdasarkan {jumlah_match} kejadian) dan Root Cause Analysis (RCA) spesifik untuk {ac_type}:
-- Sertakan Diagram Fishbone / Ishikawa sederhana di dalam block code (menggunakan tanda triple backtick ``` ).
-- Gunakan karakter ASCII standar (huruf, spasi, hyphens, plus, pipa).
+{selected_method_instruction}
+(Tuliskan analisis RCA sesuai metode di atas secara profesional dan mendalam).
 
 [RECOMMENDATIONS]
-Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type}), serta Operational Special Test / Test Flight Monitoring yang ketat sebelum status observasi maintenance dilepas.
+Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type}), serta Operational Special Test / Test Flight Monitoring.
 
 [BAHASA_INGGRIS]
 [SYSTEM]
 (Provide the exact same System Description translated into professional aviation engineering English for {ac_type})
 
 [RCA]
-(Provide the exact same Repetitive Defect & RCA analysis translated into professional aviation engineering English for {ac_type})
+(Provide the exact same RCA analysis translated into professional aviation engineering English for {ac_type})
 
 [RECOMMENDATIONS]
 (Provide the exact same Corrective & Preventive Recommendations translated into professional aviation engineering English for {ac_type})
 """
-
             with st.spinner(f"Menganalisis histori armada {ac_type} dan menyusun rekomendasi via Gemini..."):
                 try:
                     full_text = call_gemini_api(prompt, api_key_input)
