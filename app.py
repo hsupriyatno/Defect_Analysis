@@ -3,11 +3,8 @@ import streamlit as st
 import re
 import io
 import html
-import streamlit as st
 import requests
 import json
-
-# ... modul import lainnya ...
 from datetime import datetime
 from google import genai
 
@@ -50,7 +47,6 @@ def call_gemini_api(prompt_text, user_api_key=""):
     """
     Memanggil Gemini API via REST HTTP Request menggunakan model gemini-3.6-flash.
     """
-    # 1. Ambil API Key dari input sidebar atau Streamlit Secrets
     api_key = user_api_key.strip() if user_api_key else ""
     
     if not api_key:
@@ -65,10 +61,8 @@ def call_gemini_api(prompt_text, user_api_key=""):
 
     clean_api_key = str(api_key).strip().strip('"').strip("'")
 
-    # 2. Endpoint REST API Gemini (Menggunakan model gemini-3.6-flash)
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
     
-    # 3. Header autentikasi menggunakan x-goog-api-key
     headers = {
         "Content-Type": "application/json",
         "x-goog-api-key": clean_api_key
@@ -84,7 +78,6 @@ def call_gemini_api(prompt_text, user_api_key=""):
         ]
     }
 
-    # 4. Eksekusi Request
     response = requests.post(url, headers=headers, json=payload, timeout=60)
     
     if response.status_code != 200:
@@ -96,6 +89,7 @@ def call_gemini_api(prompt_text, user_api_key=""):
         return res_json['candidates'][0]['content']['parts'][0]['text']
     except (KeyError, IndexError):
         raise ValueError(f"Respon tidak sesuai format: {res_json}")
+
 # ---------------------------------------------------------
 # MEMBACA DAN MEMFILTER DATABASE EXCEL (HANYA UNSCHEDULED)
 # ---------------------------------------------------------
@@ -105,10 +99,7 @@ def load_defect_db_by_sheet(sheet_name):
         df = pd.read_excel("defect_database.xlsx", sheet_name=sheet_name)
         
         if not df.empty:
-            # Mengubah setiap sel menjadi string dengan aman untuk menghindari error tipe data float/NaN
             combined_text = df.astype(object).fillna('').astype(str).agg(' '.join, axis=1).str.upper()
-            
-            # Pola kata kunci / format Scheduled Maintenance yang ingin DIKELUARKAN (EXCLUDE)
             scheduled_pattern = r'(WO|OCK-WO|OCL-WO|DUE\s*LIST|ROUTINE|INSPECTION|COMPANY\s*CONVENIENCE)'
             
             mask_scheduled = combined_text.str.contains(scheduled_pattern, regex=True, na=False)
@@ -159,7 +150,7 @@ def process_ai_text_for_pdf(text, styles):
     return story_elements
 
 # ---------------------------------------------------------
-# FUNGSI GENERATE LAPORAN PDF (4 BAGIAN UTAMA + TABEL HISTORI)
+# FUNGSI GENERATE LAPORAN PDF
 # ---------------------------------------------------------
 def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_sys_text, ai_rca_text, ai_rec_text, df_history, lang="id"):
     buffer = io.BytesIO()
@@ -223,12 +214,10 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_sys_text, ai_rca_t
         textColor=colors.white
     )
 
-    # Header Dokumen
     story.append(Paragraph(labels["title"], title_style))
     story.append(Paragraph(f"Generated on: {datetime.now().strftime('%d %B %Y, %H:%M WIB')} | System: AIRFAST Indonesia - Defect Analyzer", subtitle_style))
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#1E3A8A'), spaceAfter=10))
 
-    # 1. Informasi Defect
     story.append(Paragraph(labels["sec1"], h2_style))
     info_data = [
         [Paragraph(f"<b>{labels['ac_label']}</b>", body_style), Paragraph(html.escape(ac_type), body_style)],
@@ -245,22 +234,18 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, ai_sys_text, ai_rca_t
     story.append(t_info)
     story.append(Spacer(1, 8))
 
-    # 2. System Description
     story.append(Paragraph(labels["sec2"], h2_style))
     story.extend(process_ai_text_for_pdf(ai_sys_text, styles))
     story.append(Spacer(1, 8))
 
-    # 3. Repetitive Defect & RCA (Bold Biru)
     story.append(Paragraph(labels["sec3"], h2_style))
     story.extend(process_ai_text_for_pdf(ai_rca_text, styles))
     story.append(Spacer(1, 8))
 
-    # 4. Corrective & Preventive Recommendations (Bold Biru)
     story.append(Paragraph(labels["sec4"], h2_style))
     story.extend(process_ai_text_for_pdf(ai_rec_text, styles))
     story.append(Spacer(1, 10))
 
-    # 5. Historical Record (Tabel Database Unscheduled)
     story.append(Paragraph(labels["sec5"], h2_style))
     if not df_history.empty:
         df_pdf = df_history.copy()
@@ -340,7 +325,6 @@ if st.button("Analisis Kasus & History", type="primary"):
         df_defect = load_defect_db_by_sheet(ac_type)
         
         if not df_defect.empty:
-            # 1. Ekstraksi akronim/sistem utama dari input user
             text_upper = kasus_baru.upper()
             core_system_keywords = []
             known_systems = [
@@ -353,7 +337,6 @@ if st.button("Analisis Kasus & History", type="primary"):
                 if sys_word in text_upper:
                     core_system_keywords.append(sys_word)
             
-            # 2. Filter berdasarkan ATA Chapter terlebih dahulu (jika diisi)
             mask_ata = pd.Series(True, index=df_defect.index)
             if selected_ata.strip():
                 ata_clean = re.sub(r'\D', '', selected_ata)
@@ -362,14 +345,10 @@ if st.button("Analisis Kasus & History", type="primary"):
 
             df_ata_subset = df_defect[mask_ata] if selected_ata.strip() else df_defect
 
-            # 3. Penyaringan Ketat Berbasis Core System Keyword (Aman dari error float/NaN)
             history_match = pd.DataFrame()
             
             if core_system_keywords and not df_ata_subset.empty:
-                # Konversi aman seluruh sel menjadi string untuk menghindari error float found
                 row_text = df_ata_subset.astype(object).fillna('').astype(str).agg(' '.join, axis=1).str.upper()
-                
-                # Buat pola regex ketat yang memuat salah satu keyword inti
                 pattern = "|".join(core_system_keywords)
                 mask_strict = row_text.str.contains(pattern, case=False, na=False)
                 
@@ -383,7 +362,6 @@ if st.button("Analisis Kasus & History", type="primary"):
             else:
                 history_match = df_ata_subset.copy()
 
-            # 4. Batasi maksimal 15 record teratas yang relevan
             if not history_match.empty:
                 df_history_sorted = history_match.head(15).copy()
                 df_history_sorted['Date_Parsed'] = pd.to_datetime(df_history_sorted['Date'], errors='coerce')
@@ -416,21 +394,20 @@ if st.button("Analisis Kasus & History", type="primary"):
             st.session_state['selected_ata'] = selected_ata
             st.session_state['history_match'] = df_history_sorted
 
-prompt = f"""
-# Tentukan metode analisis secara otomatis berdasarkan jumlah histori (jumlah_match)
-if jumlah_match >= 5:
-    selected_method_instruction = """
-    [METODE ANALISIS YANG WAJIB DIGUNAKAN: FISHBONE / ISHIKAWA DIAGRAM]
-    Karena kasus ini memiliki riwayat repetitif yang cukup tinggi (>= 5 kejadian), buatlah analisis Root Cause Analysis (RCA) menggunakan Diagram Fishbone / Ishikawa sederhana di dalam block code (menggunakan tanda triple backtick ``` ) dengan mengkategorikan penyebab ke dalam: Manpower, Machine/LRU, Material/Hardware, Method, dan Environment.
-    """
-else:
-    selected_method_instruction = """
-    [METODE ANALISIS YANG WAJIB DIGUNAKAN: 5 WHYS INVESTIGATION]
-    Karena kasus ini memiliki sedikit atau bahkan belum ada riwayat sebelumnya (kejadian terisolasi/spesifik), lakukan investigasi Root Cause Analysis (RCA) menggunakan metode penelusuran "5 Whys" (bertanya "Mengapa" sebanyak 5 tahapan secara berurutan mulai dari gejala permukaan hingga menemukan akar penyebab tunggal yang paling mendalam).
-    """
+            # Tentukan metode analisis secara otomatis berdasarkan jumlah histori (jumlah_match)
+            if jumlah_match >= 5:
+                selected_method_instruction = """
+[METODE ANALISIS YANG WAJIB DIGUNAKAN: FISHBONE / ISHIKAWA DIAGRAM]
+Karena kasus ini memiliki riwayat repetitif yang cukup tinggi (>= 5 kejadian), buatlah analisis Root Cause Analysis (RCA) menggunakan Diagram Fishbone / Ishikawa sederhana di dalam block code (menggunakan tanda triple backtick ``` ) dengan mengkategorikan penyebab ke dalam: Manpower, Machine/LRU, Material/Hardware, Method, dan Environment.
+"""
+            else:
+                selected_method_instruction = """
+[METODE ANALISIS YANG WAJIB DIGUNAKAN: 5 WHYS INVESTIGATION]
+Karena kasus ini memiliki sedikit atau bahkan belum ada riwayat sebelumnya (kejadian terisolasi/spesifik), lakukan investigasi Root Cause Analysis (RCA) menggunakan metode penelusuran "5 Whys" (bertanya "Mengapa" sebanyak 5 tahapan secara berurutan mulai dari gejala permukaan hingga menemukan akar penyebab tunggal yang paling mendalam).
+"""
 
-# Masukkan instruksi dinamis tersebut ke dalam prompt utama Gemini
-prompt = f"""
+            # Susun prompt utama untuk Gemini
+            prompt = f"""
 Anda adalah seorang pakar Reliability Engineering penerbangan spesialis armada {ac_type}.
 
 TIPE PESAWAT: {ac_type}
@@ -468,6 +445,7 @@ Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type
 [RECOMMENDATIONS]
 (Provide the exact same Corrective & Preventive Recommendations translated into professional aviation engineering English for {ac_type})
 """
+
             with st.spinner(f"Menganalisis histori armada {ac_type} dan menyusun rekomendasi via Gemini..."):
                 try:
                     full_text = call_gemini_api(prompt, api_key_input)
@@ -476,12 +454,10 @@ Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type
                     full_text = ""
 
                 if full_text:
-                    # Inisialisasi variabel
                     text_id_sys, text_id_rca, text_id_rec = "", "", ""
                     text_en_sys, text_en_rca, text_en_rec = "", "", ""
 
                     try:
-                        # Pisahkan berdasarkan bahasa
                         if "[BAHASA_INGGRIS]" in full_text:
                             parts_lang = full_text.split("[BAHASA_INGGRIS]")
                             id_block = parts_lang[0]
@@ -490,7 +466,6 @@ Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type
                             id_block = full_text
                             en_block = full_text
 
-                        # Parse Blok Bahasa Indonesia
                         if "[SYSTEM]" in id_block and "[RCA]" in id_block and "[RECOMMENDATIONS]" in id_block:
                             sys_split = id_block.split("[SYSTEM]")[1].split("[RCA]")
                             text_id_sys = sys_split[0].strip()
@@ -500,7 +475,6 @@ Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type
                         else:
                             text_id_sys = id_block
 
-                        # Parse Blok Bahasa Inggris
                         if "[SYSTEM]" in en_block and "[RCA]" in en_block and "[RECOMMENDATIONS]" in en_block:
                             sys_split_en = en_block.split("[SYSTEM]")[1].split("[RCA]")
                             text_en_sys = sys_split_en[0].strip()
@@ -511,11 +485,9 @@ Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type
                             text_en_sys = en_block
 
                     except Exception as parse_err:
-                        # Fallback jika terjadi pergeseran format
                         text_id_sys = full_text
                         text_en_sys = full_text
 
-                    # Simpan ke session state
                     st.session_state['ai_sys_id'] = text_id_sys
                     st.session_state['ai_rca_id'] = text_id_rca
                     st.session_state['ai_rec_id'] = text_id_rec
@@ -532,25 +504,20 @@ Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type
 if 'ai_sys_id' in st.session_state:
     st.subheader(f"📋 Hasil Analisis AI & Evaluasi Keandalan ({st.session_state['ac_type']})")
     
-    # 1. Tampilkan Bagian 1: Informasi Defect yang Dilaporkan
     st.markdown("### 1. INFORMASI DEFECT YANG DILAPORKAN")
     st.info(f"**Aircraft Type:** {st.session_state.get('ac_type')}\n\n**ATA Chapter:** {st.session_state.get('selected_ata', 'N/A')}\n\n**Defect / Kasus Dilaporkan:**\n{st.session_state.get('kasus_baru')}")
     
-    # 2. Tampilkan Bagian 2: System Description
     st.markdown("### 2. SYSTEM DESCRIPTION & OPERATIONAL PRINCIPLES")
     st.write(st.session_state.get('ai_sys_id', ''))
     
-    # 3. Tampilkan Bagian 3: RCA
     st.markdown("### 3. REPETITIVE DEFECT ANALYSIS & ROOT CAUSE ANALYSIS (RCA)")
     st.write(st.session_state.get('ai_rca_id', ''))
     
-    # 4. Tampilkan Bagian 4: Recommendations
     st.markdown("### 4. CORRECTIVE & PREVENTIVE RECOMMENDATIONS")
     st.write(st.session_state.get('ai_rec_id', ''))
     
     st.divider()
     
-    # Bagian Pilihan Bahasa & Tombol Download PDF
     col_pdf1, col_pdf2 = st.columns([2, 2])
     with col_pdf1:
         pdf_lang = st.radio(
@@ -590,6 +557,5 @@ if 'ai_sys_id' in st.session_state:
             type="primary"
         )
     
-    # 5. Tampilkan Bagian 5: Historical Record (Tabel Database Unscheduled)
     st.subheader(f"5. HISTORICAL RECORD (Database Unscheduled {st.session_state['ac_type']} - {len(st.session_state['history_match'])} Record Ditemukan):")
     st.dataframe(st.session_state['history_match'], use_container_width=True)
