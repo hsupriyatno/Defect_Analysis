@@ -315,7 +315,7 @@ with col_ata:
 
 kasus_baru = st.text_area(
     "Masukkan Deskripsi Defect / Discrepancy Baru:",
-    placeholder="Contoh: HYDRAULIC PUMP CYCLING FREQUENTLY IN FLIGHT"
+    placeholder="Contoh: LAVATORY DOOR SPRING BROKEN"
 )
 
 if st.button("Analisis Kasus & History", type="primary"):
@@ -325,18 +325,36 @@ if st.button("Analisis Kasus & History", type="primary"):
         df_defect = load_defect_db_by_sheet(ac_type)
         
         if not df_defect.empty:
+            # 1. Ekstraksi Kata Kunci Sistem Utama & Komponen (Avionik, Interior, Mekanikal)
             text_upper = kasus_baru.upper()
             core_system_keywords = []
+            
             known_systems = [
+                # Avionik & Elektrikal
                 "WXR", "RADAR", "WEATHER", "PITOT", "STATIC", "ALT", "ALTIMETER", 
                 "TRANSPONDER", "XPDR", "FMC", "FMS", "GPS", "IRS", "TCAS", "GPWS", 
-                "RMI", "VOR", "ILS", "ADF", "DME", "AUTOPILOT", "A/P", "FD", "EGT", "N1"
+                "RMI", "VOR", "ILS", "ADF", "DME", "AUTOPILOT", "A/P", "FD", "EGT", "N1",
+                # Interior, Cabin, ATA 25 & Mekanikal
+                "LAVATORY", "LAV", "DOOR", "SPRING", "SEAT", "LOCK", "LATCH", "GALLEY",
+                "LIFE VEST", "JACKET", "BELT", "TABLE", "CARPET", "LIGHT", "LAMP",
+                "SLIDE", "OXYGEN", "MASK", "DRAIN", "VALVE", "PUMP", "ACTUATOR"
             ]
             
             for sys_word in known_systems:
                 if sys_word in text_upper:
                     core_system_keywords.append(sys_word)
             
+            # Fallback Dinamis jika tidak ada di known_systems
+            if not core_system_keywords:
+                stop_words = {
+                    "FOUND", "DURING", "PRE", "FLIGHT", "AFTER", "BEFORE", "IN", "AT", "ON", "AND", 
+                    "THE", "TO", "OF", "WITH", "IS", "WAS", "FOR", "CHECK", "INSPECTED", "OUR", "AIRCRAFT",
+                    "PLEASE", "KINDLY", "REPORTED", "BROKEN", "DAMAGED", "FAIL", "FAILED", "FAULT"
+                }
+                raw_words = re.findall(r'\b[A-Za-z0-9]+\b', text_upper)
+                core_system_keywords = [w for w in raw_words if len(w) > 3 and w not in stop_words]
+
+            # 2. Filter berdasarkan ATA Chapter terlebih dahulu (jika diisi)
             mask_ata = pd.Series(True, index=df_defect.index)
             if selected_ata.strip():
                 ata_clean = re.sub(r'\D', '', selected_ata)
@@ -345,6 +363,7 @@ if st.button("Analisis Kasus & History", type="primary"):
 
             df_ata_subset = df_defect[mask_ata] if selected_ata.strip() else df_defect
 
+            # 3. Penyaringan Ketat Berbasis Core System Keyword
             history_match = pd.DataFrame()
             
             if core_system_keywords and not df_ata_subset.empty:
@@ -360,8 +379,9 @@ if st.button("Analisis Kasus & History", type="primary"):
                     )
                     history_match = history_match.sort_values(by=['Relevance_Score', 'Date'], ascending=[False, False])
             else:
-                history_match = df_ata_subset.copy()
+                history_match = pd.DataFrame()
 
+            # 4. Batasi maksimal 15 record teratas yang relevan
             if not history_match.empty:
                 df_history_sorted = history_match.head(15).copy()
                 df_history_sorted['Date_Parsed'] = pd.to_datetime(df_history_sorted['Date'], errors='coerce')
@@ -394,7 +414,7 @@ if st.button("Analisis Kasus & History", type="primary"):
             st.session_state['selected_ata'] = selected_ata
             st.session_state['history_match'] = df_history_sorted
 
-            # Tentukan metode analisis secara otomatis berdasarkan jumlah histori (jumlah_match)
+            # Tentukan metode analisis secara otomatis (Fishbone vs 5 Whys)
             if jumlah_match >= 5:
                 selected_method_instruction = """
 [METODE ANALISIS YANG WAJIB DIGUNAKAN: FISHBONE / ISHIKAWA DIAGRAM]
