@@ -339,12 +339,9 @@ if st.button("Analisis Kasus & History", type="primary"):
     elif kasus_baru.strip():
         df_defect = load_defect_db_by_sheet(ac_type)
         
-        if not df_defect.empty:
-            # 1. Ekstraksi khusus istilah/akronim teknis utama dari input user (Core System Keywords)
-            # Sistem akan mencari kata kunci spesifik sistem pesawat yang diinput
+if not df_defect.empty:
+            # 1. Ekstraksi akronim/sistem utama dari input user
             text_upper = kasus_baru.upper()
-            
-            # Daftar kamus akronim/sistem utama di pesawat
             core_system_keywords = []
             known_systems = [
                 "WXR", "RADAR", "WEATHER", "PITOT", "STATIC", "ALT", "ALTIMETER", 
@@ -365,30 +362,28 @@ if st.button("Analisis Kasus & History", type="primary"):
 
             df_ata_subset = df_defect[mask_ata] if selected_ata.strip() else df_defect
 
-            # 3. Penyaringan Ketat Berbasis Core System Keyword
+            # 3. Penyaringan Ketat Berbasis Core System Keyword (Aman dari error float/NaN)
             history_match = pd.DataFrame()
             
-            if core_system_keywords:
-                # Gabungkan teks kolom catatan untuk dicek
-                row_text = df_ata_subset.astype(str).agg(' '.join, axis=1).str.upper()
+            if core_system_keywords and not df_ata_subset.empty:
+                # Konversi aman seluruh sel menjadi string untuk menghindari error float found
+                row_text = df_ata_subset.astype(object).fillna('').astype(str).agg(' '.join, axis=1).str.upper()
                 
-                # Buat pola ketat: Baris WAJIB mengandung salah satu akronim/sistem inti yang sama (misal WXR/RADAR)
+                # Buat pola regex ketat yang memuat salah satu keyword inti
                 pattern = "|".join(core_system_keywords)
                 mask_strict = row_text.str.contains(pattern, case=False, na=False)
                 
                 history_match = df_ata_subset[mask_strict].copy()
                 
-                # Tambahkan skor relevansi agar urutan teratas benar-benar kasus yang paling identik
                 if not history_match.empty:
-                    history_match['Relevance_Score'] = history_match.astype(str).agg(' '.join, axis=1).apply(
+                    history_match['Relevance_Score'] = history_match.astype(object).fillna('').astype(str).agg(' '.join, axis=1).apply(
                         lambda x: sum(2 for kw in core_system_keywords if kw in x.upper())
                     )
                     history_match = history_match.sort_values(by=['Relevance_Score', 'Date'], ascending=[False, False])
             else:
-                # Jika sistem inti tidak terdeteksi otomatis, gunakan pencarian teks normal yang sudah dibersihkan
                 history_match = df_ata_subset.copy()
 
-            # 4. Batasi maksimal 15 record teratas yang paling relevan untuk ringkasan AI dan tabel
+            # 4. Batasi maksimal 15 record teratas yang relevan
             if not history_match.empty:
                 df_history_sorted = history_match.head(15).copy()
                 df_history_sorted['Date_Parsed'] = pd.to_datetime(df_history_sorted['Date'], errors='coerce')
@@ -409,7 +404,7 @@ if st.button("Analisis Kasus & History", type="primary"):
                 kolom_tersedia = [c for c in kolom_ringkas if c in df_history_sorted.columns]
                 
                 context_history = df_history_sorted[kolom_tersedia].to_string(index=False)
-                jumlah_match = len(history_match) # Total keseluruhan match yang relevan
+                jumlah_match = len(history_match)
             else:
                 context_history = "Tidak ditemukan riwayat defect serupa di database armada ini."
                 jumlah_match = 0
