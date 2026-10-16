@@ -339,7 +339,7 @@ if st.button("Analisis Kasus & History", type="primary"):
     elif kasus_baru.strip():
         df_defect = load_defect_db_by_sheet(ac_type)
         
-if not df_defect.empty:
+        if not df_defect.empty:
             # 1. Ekstraksi akronim/sistem utama dari input user
             text_upper = kasus_baru.upper()
             core_system_keywords = []
