@@ -15,12 +15,29 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
 # ---------------------------------------------------------
-# KONFIGURASI HALAMAN
+# KONFIGURASI HALAMAN & CUSTOM CSS UNTUK MENAIKKAN LOGO
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="AIRFAST Indonesia | Defect & Reliability Analyzer",
     page_icon="✈️",
     layout="wide"
+)
+
+# Custom CSS untuk menghilangkan padding atas pada sidebar agar logo naik ke paling atas
+st.markdown(
+    """
+    <style>
+        /* Mengurangi padding atas area sidebar secara keseluruhan */
+        [data-testid="stSidebarContent"] {
+            padding-top: 1rem !important;
+        }
+        /* Menghilangkan margin atas pada blok pertama di sidebar */
+        [data-testid="stSidebarUserContent"] {
+            padding-top: 0rem !important;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
 )
 
 # ---------------------------------------------------------
@@ -59,8 +76,13 @@ def get_next_dan_key(ac_type, defect_text):
     return display_name, dan_id
 
 # ---------------------------------------------------------
-# SIDEBAR - INPUT API KEY & RIWAYAT DAN
+# SIDEBAR - LOGO LOKAL & PENGATURAN API KEY
 # ---------------------------------------------------------
+# 1. TAMPILKAN LOGO AIRFAST DI PALING ATAS SIDEBAR
+if os.path.exists("logo.png"):
+    st.sidebar.image("logo.png", use_container_width=True)
+
+# 2. PENGATURAN API KEY (DI BAWAH LOGO)
 st.sidebar.title("⚙️ Pengaturan API")
 api_key_input = st.sidebar.text_input(
     "Masukkan Gemini API Key:",
