@@ -106,6 +106,7 @@ st.sidebar.title("⚙️ Pengaturan API")
 api_key_input = st.sidebar.text_input(
     "Masukkan Gemini API Key:",
     type="password",
+    key="user_api_key",
     help="Dapatkan API Key gratis di https://aistudio.google.com/app/apikey"
 )
 
@@ -159,8 +160,10 @@ st.sidebar.info(
 # FUNGSI PEMANGGILAN GEMINI API
 # ---------------------------------------------------------
 def call_gemini_api(prompt_text, user_api_key="", uploaded_file=None):
-    api_key = user_api_key.strip() if user_api_key else ""
+    # 1. Prioritas utama: Ambil dari parameter yang dikirim ATAU dari session_state sidebar
+    api_key = user_api_key.strip() if user_api_key else st.session_state.get('user_api_key', '').strip()
     
+    # 2. Fallback cadangan: Jika masih kosong, coba ambil dari st.secrets
     if not api_key:
         try:
             if "GEMINI_API_KEY" in st.secrets:
@@ -168,10 +171,13 @@ def call_gemini_api(prompt_text, user_api_key="", uploaded_file=None):
         except Exception:
             pass
 
+    # 3. Jika benar-benar tidak ditemukan sama sekali
     if not api_key:
         raise ValueError("API Key tidak ditemukan. Silakan masukkan API Key di sidebar.")
 
     clean_api_key = str(api_key).strip().strip('"').strip("'")
+    
+    # Gunakan model aktif gemini-3.8-flash (atau gemini-2.0-flash)
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
     
     headers = {
@@ -179,10 +185,10 @@ def call_gemini_api(prompt_text, user_api_key="", uploaded_file=None):
         "x-goog-api-key": clean_api_key
     }
     
-    # Susun payload dasar dengan teks prompt
+    # Susun payload teks
     parts = [{"text": prompt_text}]
     
-    # Jika ada file lampiran (Gambar/PDF), encode ke Base64 dan tambahkan ke parts
+    # Tambahkan file jika ada lampiran (Gambar / PDF)
     if uploaded_file is not None:
         file_bytes = uploaded_file.getvalue()
         base64_data = base64.b64encode(file_bytes).decode('utf-8')
@@ -1568,7 +1574,7 @@ if 'iterations' in st.session_state and st.session_state['iterations']:
     
     # PERLOOPINGAN SELURUH ITERASI (AWAL HINGGA TERAKHIR) SECARA KRONOLOGIS
     for iter_data in st.session_state['iterations']:
-        idx = iter_data['iteration_index']
+        idx = iter_data.get('iteration_index', 0)
         
         if idx == 0:
             st.markdown("---")
@@ -1578,10 +1584,10 @@ if 'iterations' in st.session_state and st.session_state['iterations']:
             st.markdown("---")
             st.markdown(f"## 🔄 TAHAP {idx + 1}: {iter_data.get('title', f'Iterasi Ke-{idx}')}")
             st.caption(f"Waktu Update: {iter_data.get('timestamp', 'N/A')}")
-            st.warning(f"**Feedback / Temuan Lapangan Engineer:**\n{iter_data.get('feedback')}")
+            st.warning(f"**Feedback / Temuan Lapangan Engineer:**\n{iter_data.get('feedback', iter_data.get('feedback_text', 'N/A'))}")
 
         st.markdown("### 2. SYSTEM DESCRIPTION & OPERATIONAL PRINCIPLES")
-        st.write(iter_data.get('ai_sys_id', ''))
+        st.write(iter_data.get('ai_sys_id', iter_data.get('analysis_result', '')))
         
         st.markdown("### 3. REPETITIVE DEFECT ANALYSIS & ROOT CAUSE ANALYSIS (RCA)")
         st.write(iter_data.get('ai_rca_id', ''))
@@ -1592,48 +1598,81 @@ if 'iterations' in st.session_state and st.session_state['iterations']:
     st.divider()
 
     # --- FITUR FEEDBACK LAPANGAN & DEEP-DIVE RCA ---
-with st.expander("🛠️ Tambahkan Hasil Eksekusi & Feedback Engineer (Analisis Lanjutan / Iterasi Baru)", expanded=False):
-    feedback_text = st.text_area(
-        "Masukkan hasil tindakan / temuan baru setelah rekomendasi dijalankan:",
-        placeholder="Contoh: Pegas sudah diganti IAW AMM, namun setelah 3 hari posisi door kembali loose.",
-        key="feedback_input_text"
-    )
-    
-    # 1. Tambahkan Widget Upload File untuk Feedback/Rektifikasi
-    uploaded_feedback_file = st.file_uploader(
-        "📎 Lampirkan Bukti Rektifikasi / Foto Temuan / PDF AML (Opsional):",
-        type=["png", "jpg", "jpeg", "pdf"],
-        help="Lampirkan foto hasil penggantian komponen, foto keausan/kerusakan lanjutan, atau dokumen perbaikan.",
-        key="feedback_file_uploader"
-    )
-    
-    # Preview jika file feedback berupa gambar
-    if uploaded_feedback_file is not None and uploaded_feedback_file.type.startswith("image/"):
-        st.image(uploaded_feedback_file, caption="Preview Bukti Rektifikasi / Temuan Baru", width=300)
+    with st.expander("🛠️ Tambahkan Hasil Eksekusi & Feedback Engineer (Analisis Lanjutan / Iterasi Baru)", expanded=False):
+        feedback_text = st.text_area(
+            "Masukkan hasil tindakan / temuan baru setelah rekomendasi dijalankan:",
+            placeholder="Contoh: Pegas sudah diganti IAW AMM, namun setelah 3 hari posisi door kembali loose.",
+            key="feedback_input_text"
+        )
+        
+        # 1. Tambahkan Widget Upload File untuk Feedback/Rektifikasi
+        uploaded_feedback_file = st.file_uploader(
+            "📎 Lampirkan Bukti Rektifikasi / Foto Temuan / PDF AML (Opsional):",
+            type=["png", "jpg", "jpeg", "pdf"],
+            help="Lampirkan foto hasil penggantian komponen, foto keausan/kerusakan lanjutan, atau dokumen perbaikan.",
+            key="feedback_file_uploader"
+        )
+        
+        # Preview jika file feedback berupa gambar
+        if uploaded_feedback_file is not None and uploaded_feedback_file.type.startswith("image/"):
+            st.image(uploaded_feedback_file, caption="Preview Bukti Rektifikasi / Temuan Baru", width=300)
 
-    # 2. Tombol Eksekusi Analisis Lanjutan
-    if st.button("Jalankan Analisis Lanjutan (Deep-Dive RCA)", type="primary"):
-        if not feedback_text.strip() and uploaded_feedback_file is None:
-            st.warning("⚠️ Masukkan catatan temuan perbaikan atau lampirkan file sebelum menjalankan analisis lanjutan.")
-        else:
-            # Rangkai prompt iterasi dengan konteks investigasi sebelumnya
-            previous_iterations = current_report.get("iterations", [])
-            iteration_number = len(previous_iterations) + 1
-            
-            # Tambahkan catatan instruksi file jika ada lampiran
-            feedback_file_instruction = ""
-            if uploaded_feedback_file is not None:
-                feedback_file_instruction = (
-                    "\n\nCATATAN MULTIMODAL REKTIFIKASI:\n"
-                    "Engineer melampirkan foto/dokumen bukti rektifikasi atau temuan fisik terbaru. "
-                    "Harap periksa dan evaluasi bukti visual/dokumen ini untuk mempertajam analisis penyebab berulang (Deep-Dive RCA) "
-                    "serta berikan tindakan perbaikan tingkat lanjut."
-                )
+        # 2. Tombol Eksekusi Analisis Lanjutan
+        if st.button("Jalankan Analisis Lanjutan (Deep-Dive RCA)", type="primary"):
+            if not feedback_text.strip() and uploaded_feedback_file is None:
+                st.warning("⚠️ Masukkan catatan temuan perbaikan atau lampirkan file sebelum menjalankan analisis lanjutan.")
+            else:
+                # Ambil API Key secara langsung dan aman dari st.session_state['user_api_key']
+                active_api_key = st.session_state.get('user_api_key', '').strip()
+                if not active_api_key:
+                    st.error("⚠️ API Key tidak ditemukan di sidebar. Silakan masukkan API Key di panel sebelah kiri.")
+                else:
+                    # Inisialisasi list all_reports jika belum ada
+                    if 'all_reports' not in locals() and 'all_reports' not in globals():
+                        all_reports = load_reports_from_json() if 'load_reports_from_json' in globals() else []
 
-            prompt_feedback = f"""
+                    # Ambil atau buat objek current_report secara aman
+                    active_dan = st.session_state.get('dan_code', None)
+                    current_report = None
+                    
+                    if 'all_reports' in locals() and all_reports:
+                        for rep in all_reports:
+                            if rep.get("dan_number") == active_dan:
+                                current_report = rep
+                                break
+                        if not current_report:
+                            current_report = all_reports[-1]
+                    
+                    if not current_report:
+                        current_report = {
+                            "dan_number": active_dan or "DAN-TEMP",
+                            "ac_type": st.session_state.get('ac_type', ''),
+                            "ac_reg": st.session_state.get('ac_reg', ''),
+                            "kasus_baru": st.session_state.get('kasus_baru', ''),
+                            "selected_ata": st.session_state.get('selected_ata', ''),
+                            "iterations": []
+                        }
+                        if 'all_reports' in locals():
+                            all_reports.append(current_report)
+
+                    # Rangkai prompt iterasi dengan konteks investigasi sebelumnya
+                    previous_iterations = current_report.get("iterations", [])
+                    iteration_number = len(previous_iterations) + 1
+                    
+                    # Tambahkan catatan instruksi file jika ada lampiran
+                    feedback_file_instruction = ""
+                    if uploaded_feedback_file is not None:
+                        feedback_file_instruction = (
+                            "\n\nCATATAN MULTIMODAL REKTIFIKASI:\n"
+                            "Engineer melampirkan foto/dokumen bukti rektifikasi atau temuan fisik terbaru. "
+                            "Harap periksa dan evaluasi bukti visual/dokumen ini untuk mempertajam analisis penyebab berulang (Deep-Dive RCA) "
+                            "serta berikan tindakan perbaikan tingkat lanjut."
+                        )
+
+                    prompt_feedback = f"""
 Anda adalah pakar Reliability Engineering penerbangan yang sedang melakukan evaluasi berulang (iterasi ke-{iteration_number}) untuk armada {current_report.get('ac_type')}.
 
-INFORMASI AVAL DEFECT (DAN: {current_report.get('dan_number')}):
+INFORMASI AWAL DEFECT (DAN: {current_report.get('dan_number')}):
 - Aircraft Type: {current_report.get('ac_type')} ({current_report.get('ac_reg', 'N/A')})
 - ATA Chapter: {current_report.get('selected_ata', 'N/A')}
 - Initial Defect: {current_report.get('kasus_baru')}
@@ -1666,61 +1705,73 @@ Rekomendasi tindakan teknis lanjutan, pemeriksaan komponen sekunder, atau penyes
 (Next action recommendations in English)
 """
 
-            with st.spinner(f"Menganalisis feedback & lampiran rektifikasi iterasi ke-{iteration_number}..."):
-                try:
-                    # Panggil Gemini API dengan menyertakan file feedback
-                    new_analysis_text = call_gemini_api(
-                        prompt_feedback, 
-                        api_key_input, 
-                        uploaded_file=uploaded_feedback_file
-                    )
-                    
-                    # Simpan iterasi baru ke dalam array 'iterations'
-                    new_iteration = {
-                        "iteration_index": iteration_number,
-                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "feedback_text": feedback_text,
-                        "has_attachment": uploaded_feedback_file is not None,
-                        "attachment_name": uploaded_feedback_file.name if uploaded_feedback_file else None,
-                        "analysis_result": new_analysis_text
-                    }
-                    
-                    current_report["iterations"].append(new_iteration)
-                    
-                    # Simpan pembaruan ke saved_reports.json
-                    save_reports_to_json(all_reports)
-                    st.success(f"✅ Analisis Lanjutan Iterasi ke-{iteration_number} berhasil ditambahkan dan disimpan!")
-                    st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"⚠️ Gagal melakukan analisis lanjutan: {e}")
+                    with st.spinner(f"Menganalisis feedback & lampiran rektifikasi iterasi ke-{iteration_number}..."):
+                        try:
+                            # Panggil Gemini API menggunakan active_api_key yang dipastikan ada
+                            new_analysis_text = call_gemini_api(
+                                prompt_feedback, 
+                                active_api_key, 
+                                uploaded_file=uploaded_feedback_file
+                            )
+                            
+                            # Simpan iterasi baru ke dalam array 'iterations'
+                            new_iteration = {
+                                "iteration_index": iteration_number,
+                                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "feedback_text": feedback_text,
+                                "has_attachment": uploaded_feedback_file is not None,
+                                "attachment_name": uploaded_feedback_file.name if uploaded_feedback_file else None,
+                                "analysis_result": new_analysis_text
+                            }
+                            
+                            current_report.setdefault("iterations", []).append(new_iteration)
+                            st.session_state['iterations'].append(new_iteration)
+                            
+                            # Simpan pembaruan ke saved_reports.json jika fungsi tersedia
+                            if 'save_reports_to_json' in globals() and 'all_reports' in locals():
+                                save_reports_to_json(all_reports)
 
-    st.divider()
+                            st.success(f"✅ Analisis Lanjutan Iterasi ke-{iteration_number} berhasil ditambahkan dan disimpan!")
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"⚠️ Gagal melakukan analisis lanjutan: {e}")
 
-    # Tombol Download PDF Report
-    col_pdf1, col_pdf2 = st.columns([2, 2])
-    with col_pdf1:
-        pdf_lang = st.radio(
-            "🌐 Pilih Bahasa Laporan PDF:",
-            options=["Bahasa Indonesia", "English"],
-            horizontal=True,
-            key="pdf_lang_radio"
-        )
-    
-    lang_code = "id" if pdf_lang == "Bahasa Indonesia" else "en"
-    df_hist_pdf = st.session_state.get('history_match', pd.DataFrame())
-    
+# ==============================================================================
+# KELUAR DARI EXPANDER & ITERATIONS (RATA KIRI PENUH)
+# ==============================================================================
+
+st.markdown("---")
+
+# --- SECTION 1: DOWNLOAD LAPORAN PDF (MANDIRI DI HALAMAN UTAMA) ---
+col_pdf1, col_pdf2 = st.columns([2, 2])
+with col_pdf1:
+    pdf_lang = st.radio(
+        "🌐 Pilih Bahasa Laporan PDF:",
+        options=["Bahasa Indonesia", "English"],
+        horizontal=True,
+        key="pdf_lang_radio"
+    )
+
+lang_code = "id" if pdf_lang == "Bahasa Indonesia" else "en"
+df_hist_pdf = st.session_state.get('history_match', pd.DataFrame())
+
+# Generate PDF secara aman
+try:
     pdf_data = generate_pdf_report(
         st.session_state.get('ac_type', 'AIRCRAFT'),
         st.session_state.get('kasus_baru', ''),
         st.session_state.get('selected_ata', ''),
-        st.session_state['iterations'],
+        st.session_state.get('iterations', []),
         df_hist_pdf,
         lang=lang_code
     )
-    
-    with col_pdf2:
-        st.write("")
+except Exception as e:
+    pdf_data = b""
+
+with col_pdf2:
+    st.write("")
+    if pdf_data:
         st.download_button(
             label=f"📥 Download Laporan ({pdf_lang})",
             data=pdf_data,
@@ -1729,7 +1780,11 @@ Rekomendasi tindakan teknis lanjutan, pemeriksaan komponen sekunder, atau penyes
             type="primary"
         )
 
-    # Tabel Historical Record di UI bawah
-    st.markdown("---")
-    st.subheader(f"5. HISTORICAL RECORD (Database Unscheduled {st.session_state.get('ac_type')} - {len(df_hist_pdf)} Record Ditemukan):")
+# --- SECTION 2: HISTORICAL RECORD (MANDIRI DI HALAMAN UTAMA) ---
+st.markdown("---")
+st.subheader(f"5. HISTORICAL RECORD (Database Unscheduled {st.session_state.get('ac_type', '')} - {len(df_hist_pdf)} Record Ditemukan):")
+
+if not df_hist_pdf.empty:
     st.dataframe(df_hist_pdf, use_container_width=True)
+else:
+    st.info("Tidak ada catatan riwayat histori yang ditemukan.")
