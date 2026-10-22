@@ -1593,7 +1593,66 @@ if 'iterations' in st.session_state and st.session_state['iterations']:
         st.write(iter_data.get('ai_rca_id', ''))
         
         st.markdown("### 4. CORRECTIVE & PREVENTIVE RECOMMENDATIONS")
-        st.write(iter_data.get('ai_rec_id', ''))
+        st.write(iter_data.get('ai_rec_id', ''))# PERLOOPINGAN SELURUH ITERASI (AWAL HINGGA TERAKHIR) SECARA KRONOLOGIS
+    for iter_data in st.session_state['iterations']:
+        idx = iter_data.get('iteration_index', 0)
+        
+        if idx == 0:
+            st.markdown("---")
+            st.markdown("## 🔹 TAHAP 1: ANALISIS KELAYAKAN & RCA AWAL")
+            st.caption(f"Waktu Analisis: {iter_data.get('timestamp', 'N/A')}")
+        else:
+            st.markdown("---")
+            st.markdown(f"## 🔄 TAHAP {idx + 1}: {iter_data.get('title', f'Iterasi Ke-{idx}')}")
+            st.caption(f"Waktu Update: {iter_data.get('timestamp', 'N/A')}")
+            st.warning(f"**Feedback / Temuan Lapangan Engineer:**\n{iter_data.get('feedback', iter_data.get('feedback_text', 'N/A'))}")
+
+        # Ambil teks hasil analisis
+        full_result = iter_data.get('analysis_result', '')
+        ai_sys = iter_data.get('ai_sys_id', '')
+        ai_rca = iter_data.get('ai_rca_id', '')
+        ai_rec = iter_data.get('ai_rec_id', '')
+
+        # Jika hasil analisis tersimpan sebagai satu kesatuan mentah (Iterasi Lanjutan)
+        if full_result and not (ai_sys or ai_rca or ai_rec):
+            # Parse otomatis berdasarkan tag jika ada
+            if "[SYSTEM]" in full_result or "[RCA]" in full_result or "[RECOMMENDATIONS]" in full_result:
+                parts_sys = full_result.split("[RCA]")
+                sys_part = parts_sys[0].replace("[SYSTEM]", "").replace("[BAHASA_INDONESIA]", "").strip()
+                
+                rca_part = ""
+                rec_part = ""
+                if len(parts_sys) > 1:
+                    parts_rec = parts_sys[1].split("[RECOMMENDATIONS]")
+                    rca_part = parts_rec[0].strip()
+                    if len(parts_rec) > 1:
+                        rec_part = parts_rec[1].split("[BAHASA_INGGRIS]")[0].strip()
+                
+                st.markdown("### 2. SYSTEM DESCRIPTION & OPERATIONAL PRINCIPLES")
+                st.write(sys_part)
+                
+                if rca_part:
+                    st.markdown("### 3. REPETITIVE DEFECT ANALYSIS & ROOT CAUSE ANALYSIS (RCA)")
+                    st.write(rca_part)
+                    
+                if rec_part:
+                    st.markdown("### 4. CORRECTIVE & PREVENTIVE RECOMMENDATIONS")
+                    st.write(rec_part)
+            else:
+                # Jika tidak ada tag khusus, tampilkan utuh sebagai Tampilan Analisis Lanjutan
+                st.markdown("### 2. HASIL EVALUASI & ANALISIS LANJUTAN")
+                st.write(full_result)
+        else:
+            # Tampilan standar untuk Tahap 1 / data terpisah
+            if ai_sys:
+                st.markdown("### 2. SYSTEM DESCRIPTION & OPERATIONAL PRINCIPLES")
+                st.write(ai_sys)
+            if ai_rca:
+                st.markdown("### 3. REPETITIVE DEFECT ANALYSIS & ROOT CAUSE ANALYSIS (RCA)")
+                st.write(ai_rca)
+            if ai_rec:
+                st.markdown("### 4. CORRECTIVE & PREVENTIVE RECOMMENDATIONS")
+                st.write(ai_rec)
     
     st.divider()
 
