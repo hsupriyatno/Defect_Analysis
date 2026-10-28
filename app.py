@@ -239,194 +239,250 @@ def load_defect_db_by_sheet(sheet_name):
         return pd.DataFrame()
 
 # ---------------------------------------------------------
-# FUNGSI PENGOLAH TEKS UNTUK PDF
+# 1. FUNGSI PEMBANTU: PARSER TABEL MARKDOWN KE REPORTLAB
 # ---------------------------------------------------------
-def process_ai_text_for_pdf(text, styles):
-    story_elements = []
+def parse_markdown_table_to_reportlab(text_block, styles):
+    lines = text_block.strip().split('\n')
+    table_data = []
     
-    body_style = ParagraphStyle(
-        'BodyDark', parent=styles['Normal'], fontName='Helvetica', fontSize=10, leading=14,
-        textColor=colors.HexColor('#1F2937')
-    )
-    
-    code_style = ParagraphStyle(
-        'FishboneCode', parent=styles['Normal'], fontName='Courier', fontSize=8, leading=10,
-        textColor=colors.HexColor('#1E3A8A'), backColor=colors.HexColor('#F3F4F6'),
-        borderPadding=6, spaceBefore=6, spaceAfter=8
-    )
+    th_style = ParagraphStyle('THead', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, textColor=colors.whitesmoke, alignment=1)
+    td_style = ParagraphStyle('TData', parent=styles['Normal'], fontName='Helvetica', fontSize=7, textColor=colors.darkslategray)
+    td_center = ParagraphStyle('TDataCenter', parent=styles['Normal'], fontName='Helvetica', fontSize=7, textColor=colors.darkslategray, alignment=1)
 
-    parts = text.split("```")
+    is_table_active = False
     
-    for i, part in enumerate(parts):
-        if not part.strip():
-            continue
+    for line in lines:
+        line = line.strip()
+        if line.startswith('|') and line.endswith('|'):
+            if '---' in line or '::' in line:
+                continue
             
-        if i % 2 == 1:
-            clean_code = re.sub(r'^(text|ascii|markdown)\n', '', part.strip(), flags=re.IGNORECASE)
-            clean_code = html.escape(clean_code).replace('\n', '<br/>').replace(' ', '&nbsp;')
-            story_elements.append(Paragraph(clean_code, code_style))
-        else:
-            clean_text = html.escape(part)
-            clean_text = clean_text.replace('\n', '<br/>')
-            clean_text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', clean_text)
-            clean_text = re.sub(r'#{1,6}\s*', '', clean_text)
-            clean_text = clean_text.replace('---', '')
-            story_elements.append(Paragraph(clean_text, body_style))
+            cells = [c.strip() for c in line.split('|')[1:-1]]
+            if not cells or cells[0] == '':
+                continue
+                
+            if not is_table_active:
+                formatted_cells = [Paragraph(f"<b>{c}</b>", th_style) for c in cells]
+                is_table_active = True
+            else:
+                formatted_cells = []
+                for i, c in enumerate(cells):
+                    if i < 3:
+                        formatted_cells.append(Paragraph(c, td_center))
+                    else:
+                        formatted_cells.append(Paragraph(c, td_style))
             
-    return story_elements
+            table_data.append(formatted_cells)
+            
+    if len(table_data) > 1:
+        col_widths = [50, 80, 70, 315]
+        t = Table(table_data, colWidths=col_widths, repeatRows=1)
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1E3A8A')),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#d3d3d3')),
+            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F3F4F6')]),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+        ]))
+        return t
+    return None
 
 # ---------------------------------------------------------
-# FUNGSI GENERATE LAPORAN PDF (MENAMPUNG SEMUA ITERASI)
+# 2. FUNGSI UTAMA: GENERATE LAPORAN PDF (DENGAN BAGIAN 5)
 # ---------------------------------------------------------
 def generate_pdf_report(ac_type, kasus_baru, selected_ata, iterations_list, df_history, lang="id"):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=letter,
-        rightMargin=28, leftMargin=28, topMargin=28, bottomMargin=28
-    )
-    story = []
-    styles = getSampleStyleSheet()
+    try:
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=letter,
+            rightMargin=28, leftMargin=28, topMargin=28, bottomMargin=28
+        )
+        story = []
+        styles = getSampleStyleSheet()
 
-    labels = {
-        "id": {
-            "title": "LAPORAN EVALUASI KEANDALAN TEKNIS & REKAM JEJAK INVESTIGASI",
-            "sec1": "1. INFORMASI DEFECT YANG DILAPORKAN",
-            "sec5": f"5. HISTORICAL RECORD (DATABASE UNSCHEDULED: {len(df_history)} Record Ditemukan)",
-            "ac_label": "Aircraft Type:",
-            "defect_label": "Defect Dilaporkan:",
-            "ata_label": "ATA Chapter:",
-            "no_match": "Tidak ada riwayat defect yang cocok."
-        },
-        "en": {
-            "title": "TECHNICAL RELIABILITY EVALUATION & INVESTIGATION AUDIT TRAIL",
-            "sec1": "1. REPORTED DEFECT INFORMATION",
-            "sec5": f"5. HISTORICAL RECORD (UNSCHEDULED DATABASE: {len(df_history)} Records Found)",
-            "ac_label": "Aircraft Type:",
-            "defect_label": "Reported Defect:",
-            "ata_label": "ATA Chapter:",
-            "no_match": "No historical records matched."
-        }
-    }[lang]
+        labels = {
+            "id": {
+                "title": "LAPORAN EVALUASI KEANDALAN TEKNIS & REKAM JEJAK INVESTIGASI",
+                "sec1": "1. INFORMASI DEFECT YANG DILAPORKAN",
+                "sec2": "2. SYSTEM DESCRIPTION & OPERATIONAL PRINCIPLES",
+                "sec3": "3. REPETITIVE DEFECT ANALYSIS & ROOT CAUSE ANALYSIS (RCA)",
+                "sec4": "4. CORRECTIVE & PREVENTIVE RECOMMENDATIONS",
+                "sec5": f"5. HISTORICAL RECORD (DATABASE UNSCHEDULED: {len(df_history)} Record Ditemukan)",
+                "ac_label": "Aircraft Type:",
+                "defect_label": "Defect Dilaporkan:",
+                "ata_label": "ATA Chapter:",
+                "no_match": "Tidak ada riwayat defect yang cocok."
+            },
+            "en": {
+                "title": "TECHNICAL RELIABILITY EVALUATION & INVESTIGATION AUDIT TRAIL",
+                "sec1": "1. REPORTED DEFECT INFORMATION",
+                "sec2": "2. SYSTEM DESCRIPTION & OPERATIONAL PRINCIPLES",
+                "sec3": "3. REPETITIVE DEFECT ANALYSIS & ROOT CAUSE ANALYSIS (RCA)",
+                "sec4": "4. CORRECTIVE & PREVENTIVE RECOMMENDATIONS",
+                "sec5": f"5. HISTORICAL RECORD (UNSCHEDULED DATABASE: {len(df_history)} Records Found)",
+                "ac_label": "Aircraft Type:",
+                "defect_label": "Reported Defect:",
+                "ata_label": "ATA Chapter:",
+                "no_match": "No historical records matched."
+            }
+        }[lang]
 
-    title_style = ParagraphStyle(
-        'DocTitle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=14, leading=17,
-        textColor=colors.HexColor('#1E3A8A'), spaceAfter=4
-    )
-    subtitle_style = ParagraphStyle(
-        'DocSubTitle', parent=styles['Normal'], fontName='Helvetica', fontSize=8.5, leading=11,
-        textColor=colors.HexColor('#4B5563'), spaceAfter=10
-    )
-    h2_style = ParagraphStyle(
-        'SectionHeader', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=10.5, leading=13,
-        textColor=colors.HexColor('#1E3A8A'), spaceBefore=10, spaceAfter=5
-    )
-    body_style = ParagraphStyle(
-        'BodyDark', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=13,
-        textColor=colors.HexColor('#1F2937')
-    )
-    table_cell_style = ParagraphStyle(
-        'TableCell', parent=styles['Normal'], fontName='Helvetica', fontSize=8.5, leading=11,
-        textColor=colors.HexColor('#1F2937')
-    )
-    table_header_style = ParagraphStyle(
-        'TableHeader', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8.5, leading=11,
-        textColor=colors.white
-    )
+        title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=14, leading=17, textColor=colors.HexColor('#1E3A8A'), spaceAfter=4)
+        subtitle_style = ParagraphStyle('DocSubTitle', parent=styles['Normal'], fontName='Helvetica', fontSize=8.5, leading=11, textColor=colors.HexColor('#4B5563'), spaceAfter=10)
+        h2_style = ParagraphStyle('SectionHeader', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=10.5, leading=13, textColor=colors.HexColor('#1E3A8A'), spaceBefore=10, spaceAfter=5)
+        body_style = ParagraphStyle('BodyDark', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=13, textColor=colors.HexColor('#1F2937'))
+        code_style = ParagraphStyle('CodeFishbone', parent=styles['Normal'], fontName='Courier', fontSize=7.5, leading=9.5, textColor=colors.HexColor('#111827'), backColor=colors.HexColor('#F3F4F6'), borderPadding=6, spaceBefore=4, spaceAfter=6)
 
-    story.append(Paragraph(labels["title"], title_style))
-    story.append(Paragraph(f"Generated on: {datetime.now().strftime('%d %B %Y, %H:%M WIB')} | System: AIRFAST Indonesia - Defect Analyzer", subtitle_style))
-    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#1E3A8A'), spaceAfter=8))
+        story.append(Paragraph(labels["title"], title_style))
+        story.append(Paragraph(f"Generated on: {datetime.now().strftime('%d %B %Y, %H:%M WIB')} | System: AIRFAST Indonesia - Defect Analyzer", subtitle_style))
+        story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#1E3A8A'), spaceAfter=8))
 
-    # 1. Informasi Defect
-    story.append(Paragraph(labels["sec1"], h2_style))
-    info_data = [
-        [Paragraph(f"<b>{labels['ac_label']}</b>", body_style), Paragraph(html.escape(f"{ac_type} ({ac_reg if ac_reg else 'N/A'})"), body_style)],
-        [Paragraph(f"<b>{labels['ata_label']}</b>", body_style), Paragraph(html.escape(selected_ata) if selected_ata else "N/A", body_style)],
-        [Paragraph(f"<b>{labels['defect_label']}</b>", body_style), Paragraph(html.escape(kasus_baru), body_style)]
-    ]
-    t_info = Table(info_data, colWidths=[130, 426])
-    t_info.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F3F4F6')),
-        ('PADDING', (0,0), (-1,-1), 4),
-        ('VALIGN', (0,0), (-1,-1), 'TOP'),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E5E7EB'))
-    ]))
-    story.append(t_info)
-    story.append(Spacer(1, 6))
-
-    # Perulangan untuk mencetak semua iterasi ke dalam PDF
-    for iter_data in iterations_list:
-        idx = iter_data['iteration_index']
-        
-        if idx == 0:
-            story.append(Paragraph("<b>TAHAP 1: ANALISIS KELAYAKAN & RCA AWAL</b>", h2_style))
-        else:
-            story.append(Spacer(1, 4))
-            story.append(Paragraph(f"<b>TAHAP {idx + 1}: {html.escape(iter_data.get('title', ''))}</b>", h2_style))
-            if iter_data.get('feedback'):
-                story.append(Paragraph(f"<i>Feedback Lapangan: {html.escape(iter_data.get('feedback'))}</i>", body_style))
-
-        # System Description
-        story.append(Paragraph("<b>System Description & Operational Principles:</b>", ParagraphStyle('SubSec', parent=body_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#374151'))))
-        sys_text = iter_data.get('ai_sys_id', '') if lang == 'id' else iter_data.get('ai_sys_en', '')
-        story.extend(process_ai_text_for_pdf(sys_text, styles))
-        
-        # RCA
-        story.append(Paragraph("<b>Repetitive Defect Analysis & Root Cause Analysis (RCA):</b>", ParagraphStyle('SubSec2', parent=body_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#374151'))))
-        rca_text = iter_data.get('ai_rca_id', '') if lang == 'id' else iter_data.get('ai_rca_en', '')
-        story.extend(process_ai_text_for_pdf(rca_text, styles))
-        
-        # Recommendations
-        story.append(Paragraph("<b>Corrective & Preventive Recommendations:</b>", ParagraphStyle('SubSec3', parent=body_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#374151'))))
-        rec_text = iter_data.get('ai_rec_id', '') if lang == 'id' else iter_data.get('ai_rec_en', '')
-        story.extend(process_ai_text_for_pdf(rec_text, styles))
-        story.append(Spacer(1, 6))
-
-    # 5. Historical Record Tabel
-    story.append(Paragraph(labels["sec5"], h2_style))
-    if not df_history.empty:
-        df_pdf = df_history.copy()
-        if 'Date_Parsed' in df_pdf.columns:
-            df_pdf = df_pdf.sort_values(by='Date_Parsed', ascending=False)
-        elif 'Date' in df_pdf.columns:
-            df_pdf['Date_Temp'] = pd.to_datetime(df_pdf['Date'], errors='coerce')
-            df_pdf = df_pdf.sort_values(by='Date_Temp', ascending=False)
-
-        kolom_pdf = ['Date', 'AML No', 'Note / Report', 'Corrective Action']
-        kolom_tersedia = [c for c in kolom_pdf if c in df_pdf.columns]
-        
-        table_data = [[Paragraph(f"<b>{html.escape(col)}</b>", table_header_style) for col in kolom_tersedia]]
-        
-        for _, row in df_pdf.head(15).iterrows():
-            row_cells = []
-            for col in kolom_tersedia:
-                val = row[col]
-                if col == 'Date' and pd.notna(val):
-                    try:
-                        val = pd.to_datetime(val).strftime('%Y-%m-%d')
-                    except Exception:
-                        val = str(val).split()[0]
-                else:
-                    val = str(val) if pd.notna(val) else "-"
-                row_cells.append(Paragraph(html.escape(val), table_cell_style))
-            table_data.append(row_cells)
-
-        t_hist = Table(table_data, colWidths=[70, 80, 203, 203])
-        t_hist.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1E3A8A')),
+        # 1. Informasi Defect
+        story.append(Paragraph(labels["sec1"], h2_style))
+        info_data = [
+            [Paragraph(f"<b>{labels['ac_label']}</b>", body_style), Paragraph(html.escape(f"{ac_type}"), body_style)],
+            [Paragraph(f"<b>{labels['ata_label']}</b>", body_style), Paragraph(html.escape(selected_ata) if selected_ata else "N/A", body_style)],
+            [Paragraph(f"<b>{labels['defect_label']}</b>", body_style), Paragraph(html.escape(kasus_baru), body_style)]
+        ]
+        t_info = Table(info_data, colWidths=[130, 426])
+        t_info.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F3F4F6')),
             ('PADDING', (0,0), (-1,-1), 4),
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#D1D5DB')),
-            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F9FAFB')])
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E5E7EB'))
         ]))
-        story.append(t_hist)
-    else:
-        story.append(Paragraph(labels["no_match"], body_style))
+        story.append(t_info)
+        story.append(Spacer(1, 6))
 
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
+        # Loop iterasi analisis
+        for idx, iter_data in enumerate(iterations_list):
+            if idx > 0:
+                story.append(Paragraph(f"<b>--- ITERATION / FEEDBACK STEP {idx} ---</b>", h2_style))
+                feedback_note = iter_data.get('feedback_text', '')
+                if feedback_note:
+                    story.append(Paragraph(f"<b>Engineer Feedback:</b> {html.escape(feedback_note)}", body_style))
+                    story.append(Spacer(1, 4))
+
+            full_result = iter_data.get('analysis_result', '')
+            if not full_result:
+                sys_i = iter_data.get('ai_sys_id', '') if lang == 'id' else iter_data.get('ai_sys_en', '')
+                rca_i = iter_data.get('ai_rca_id', '') if lang == 'id' else iter_data.get('ai_rca_en', '')
+                rec_i = iter_data.get('ai_rec_id', '') if lang == 'id' else iter_data.get('ai_rec_en', '')
+                full_result = f"[SYSTEM]\n{sys_i}\n\n[RCA]\n{rca_i}\n\n[RECOMMENDATIONS]\n{rec_i}"
+
+            if "[BAHASA_INGGRIS]" in full_result:
+                parts_lang = full_result.split("[BAHASA_INGGRIS]")
+                target_block = parts_lang[1] if lang == "en" else parts_lang[0]
+            else:
+                target_block = full_result
+
+            target_block = target_block.replace("[BAHASA_INDONESIA]", "").replace("[BAHASA_INGGRIS]", "")
+
+            sys_content, rca_content, rec_content = "", "", ""
+            if "[SYSTEM]" in target_block:
+                s_split = target_block.split("[SYSTEM]")[1].split("[RCA]")
+                sys_content = s_split[0].strip()
+                if len(s_split) > 1:
+                    r_split = s_split[1].split("[RECOMMENDATIONS]")
+                    rca_content = r_split[0].strip()
+                    if len(r_split) > 1:
+                        rec_content = r_split[1].strip()
+            else:
+                rca_content = target_block
+
+            if sys_content:
+                story.append(Paragraph(labels["sec2"], h2_style))
+                story.append(Paragraph(html.escape(sys_content).replace('\n', '<br/>'), body_style))
+                story.append(Spacer(1, 4))
+
+            if rca_content:
+                story.append(Paragraph(labels["sec3"], h2_style))
+                chunks = rca_content.split('\n\n')
+                for chunk in chunks:
+                    # Cek apakah ini diagram ASCII (mengandung pola struktur seperti +-- atau \--> atau ===)
+                    is_ascii_diagram = ("+--" in chunk) or ("\\-->" in chunk) or ("===" in chunk) or ("---+" in chunk)
+                    
+                    if "```" in chunk or is_ascii_diagram:
+                        clean_diagram = chunk.replace("```", "").strip()
+                        story.append(Paragraph(html.escape(clean_diagram).replace('\n', '<br/>').replace(' ', '&nbsp;'), code_style))
+                        story.append(Spacer(1, 4))
+                    # Pastikan benar-benar tabel Markdown (memiliki baris pemisah |---|) DAN bukan diagram ASCII
+                    elif '|' in chunk and ('---' in chunk or '::' in chunk) and not is_ascii_diagram:
+                        pdf_table = parse_markdown_table_to_reportlab(chunk, styles)
+                        if pdf_table:
+                            story.append(pdf_table)
+                            story.append(Spacer(1, 4))
+                        else:
+                            story.append(Paragraph(html.escape(chunk).replace('\n', '<br/>'), body_style))
+                    else:
+                        story.append(Paragraph(html.escape(chunk).replace('\n', '<br/>'), body_style))
+                        story.append(Spacer(1, 4))
+
+            if rec_content:
+                story.append(Paragraph(labels["sec4"], h2_style))
+                story.append(Paragraph(html.escape(rec_content).replace('\n', '<br/>'), body_style))
+                story.append(Spacer(1, 6))
+
+        # 5. HISTORICAL RECORD SECTION (DITAMBAHKAN KEMBALI DI SINI)
+        story.append(Spacer(1, 8))
+        story.append(Paragraph(labels["sec5"], h2_style))
+        
+        if df_history is not None and not df_history.empty:
+            hist_data = []
+            th_style_h = ParagraphStyle('THist', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=7.5, textColor=colors.whitesmoke, alignment=1)
+            td_style_h = ParagraphStyle('TDataH', parent=styles['Normal'], fontName='Helvetica', fontSize=7, textColor=colors.darkslategray)
+            td_center_h = ParagraphStyle('TDataCenterH', parent=styles['Normal'], fontName='Helvetica', fontSize=7, textColor=colors.darkslategray, alignment=1)
+
+            # Header Tabel Histori
+            hist_data.append([
+                Paragraph("<b>Date</b>", th_style_h),
+                Paragraph("<b>AML No</b>", th_style_h),
+                Paragraph("<b>Note / Report</b>", th_style_h),
+                Paragraph("<b>Corrective Action</b>", th_style_h)
+            ])
+
+            for _, row in df_history.iterrows():
+                d_str = str(row.get('Date', ''))[:10]
+                aml_str = str(row.get('AML No', ''))
+                note_str = str(row.get('Note / Report', ''))
+                act_str = str(row.get('Corrective Action', ''))
+                
+                hist_data.append([
+                    Paragraph(d_str, td_center_h),
+                    Paragraph(aml_str, td_center_h),
+                    Paragraph(note_str, td_style_h),
+                    Paragraph(act_str, td_style_h)
+                ])
+
+            # Lebar kolom proporsional total 515 pt
+            col_widths_h = [60, 75, 190, 190]
+            t_hist = Table(hist_data, colWidths=col_widths_h, repeatRows=1)
+            t_hist.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1E3A8A')),
+                ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#d3d3d3')),
+                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F3F4F6')]),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+                ('TOPPADDING', (0,0), (-1,-1), 4),
+            ]))
+            story.append(t_hist)
+        else:
+            story.append(Paragraph(labels["no_match"], body_style))
+
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.getvalue()
+        
+    except Exception as e:
+        print(f"PDF Generation Error: {e}")
+        fallback_buffer = io.BytesIO()
+        fallback_doc = SimpleDocTemplate(fallback_buffer, pagesize=letter)
+        fallback_story = [Paragraph(f"Error generating full PDF: {str(e)}", getSampleStyleSheet()['Normal'])]
+        fallback_doc.build(fallback_story)
+        fallback_buffer.seek(0)
+        return fallback_buffer.getvalue()
 
 # ---------------------------------------------------------
 # MAPPING REGISTRASI FLEET & ATA CHAPTER 4-DIGIT
@@ -1274,7 +1330,6 @@ with col_ac:
     )
 
 with col_reg:
-    # Mengambil daftar registrasi yang hanya sesuai dengan tipe pesawat terpilih
     available_regs = AIRCRAFT_REG_MAP.get(ac_type, ["N/A"])
     ac_reg = st.selectbox(
         "🛩️ Aircraft Registration:",
@@ -1289,7 +1344,6 @@ with col_ata:
         help="Pilih sub-sistem ATA Chapter 4-digit yang sesuai."
     )
     
-    # Ekstrak nomor kode ATA-nya saja (misal '33-40' dari '33-40 | LIGHT Exterior')
     if selected_ata_raw != "-- Pilih ATA Chapter --":
         selected_ata = selected_ata_raw.split(" | ")[0].strip()
     else:
@@ -1300,27 +1354,31 @@ kasus_baru = st.text_area(
     placeholder="Contoh: Landing Light not illuminate"
 )
 
-# Widget Upload Gambar / Dokumen PDF Tambahan
 uploaded_file = st.file_uploader(
     "📎 Lampirkan Dokumen PDF / Foto Kerusakan (Opsional):",
     type=["png", "jpg", "jpeg", "pdf"],
     help="Anda dapat melampirkan foto komponen rusak, skema WDM/AMM, atau file PDF AML/laporan teknis untuk dibaca oleh AI."
 )
 
-# Tampilkan preview jika yang diunggah adalah gambar
 if uploaded_file is not None and uploaded_file.type.startswith("image/"):
     st.image(uploaded_file, caption="Preview Foto Kerusakan / Dokumen Lampiran", width=300)
 
+# =========================================================================
+# PROSES KETIKA TOMBOL "Analisis Kasus & History" DIKLIK
+# =========================================================================
 if st.button("Analisis Kasus & History", type="primary"):
     if not api_key_input.strip():
         st.error("⚠️ Silakan masukkan Gemini API Key Anda pada menu Sidebar di sebelah kiri terlebih dahulu.")
-    elif kasus_baru.strip():
+    elif not kasus_baru.strip():
+        st.warning("⚠️ Silakan masukkan deskripsi defect atau discrepancy terlebih dahulu.")
+    else:
         df_defect = load_defect_db_by_sheet(ac_type)
         
-        if not df_defect.empty:
+        if df_defect.empty:
+            st.error(f"⚠️ Database maintenance untuk armada {ac_type} kosong atau tidak ditemukan.")
+        else:
             text_upper = kasus_baru.upper()
             
-            # Daftar kata umum / stop words yang diabaikan agar fokus pada inti kerusakan
             stop_words = {
                 "FOUND", "DURING", "PRE", "FLIGHT", "AFTER", "BEFORE", "IN", "AT", "ON", "AND", 
                 "THE", "TO", "OF", "WITH", "IS", "WAS", "FOR", "CHECK", "INSPECTED", "OUR", "AIRCRAFT",
@@ -1328,19 +1386,14 @@ if st.button("Analisis Kasus & History", type="primary"):
             }
             
             raw_words = re.findall(r'\b[A-Za-z0-9]+\b', text_upper)
-            # Ambil semua kata kunci penting yang panjangnya > 2 huruf
             core_keywords = [w for w in raw_words if len(w) > 2 and w not in stop_words]
             
-            # Filter berdasarkan ATA Chapter (Mendukung 2 hingga 4 Digit)
-            # 1. SMART ATA MATCHING (Mendukung input 2-digit maupun 4-digit ATA)
             mask_ata = pd.Series(True, index=df_defect.index)
             if selected_ata.strip():
-                # Ambil 2 digit pertama sebagai Main Chapter untuk matching Excel (misal: '33-40' -> '33')
                 ata_digits = re.sub(r'\D', '', selected_ata)
                 main_ata_2digit = ata_digits[:2] if len(ata_digits) >= 2 else ata_digits
                 
                 if 'ATA' in df_defect.columns and main_ata_2digit:
-                    # Ambil angka dari kolom ATA Excel dan cocokkan dengan 2 digit utama
                     excel_ata_clean = df_defect['ATA'].astype(str).str.replace(r'\D', '', regex=True)
                     mask_ata = excel_ata_clean.str.startswith(main_ata_2digit) | excel_ata_clean.str.contains(main_ata_2digit, na=False)
 
@@ -1351,36 +1404,27 @@ if st.button("Analisis Kasus & History", type="primary"):
                 row_text = df_ata_subset.astype(object).fillna('').astype(str).agg(' '.join, axis=1).str.upper()
                 
                 if core_keywords:
-                    # PENYARINGAN KETAT (STRICT FILTER): 
-                    # Baris HARUS mengandung kata kunci utama yang spesifik (misalnya wajib ada kata 'SPRING' dan 'DOOR' jika diinput bersamaan)
-                    # Kita buat mask di mana setiap baris harus memenuhi minimal kata kunci komponen inti (misal: 'SPRING')
-                    
                     primary_components = [w for w in core_keywords if w in ["SPRING", "CARTRIDGE", "VALVE", "PUMP", "ACTUATOR", "SENSOR", "SWITCH", "BATTERY", "LIGHT", "MIRROR", "SEAT"]]
                     
                     if primary_components:
-                        # Jika ada komponen utama yang sangat spesifik, filter wajib mengandung komponen tersebut
                         primary_pattern = "|".join(primary_components)
                         mask_strict = row_text.str.contains(primary_pattern, case=False, na=False)
                         
-                        # Jika user juga mengetik lokasi spesifik (misal: LAVATORY), pastikan lokasi tersebut juga ada untuk mempersempit
                         if "LAVATORY" in text_upper or "LAV" in text_upper:
                             mask_lav = row_text.str.contains(r'LAVATORY|\bLAV\b', case=False, regex=True, na=False)
                             history_match = df_ata_subset[mask_strict & mask_lav].copy()
                         else:
                             history_match = df_ata_subset[mask_strict].copy()
                     else:
-                        # Fallback jika tidak ada komponen primer, gunakan seluruh core keywords dengan syarat ketat
-                        pattern_all = ".*".join(core_keywords) # Urutan atau kombinasi kata
+                        pattern_all = ".*".join(core_keywords)
                         mask_fallback = row_text.str.contains(pattern_all, case=False, regex=True, na=False)
                         history_match = df_ata_subset[mask_fallback].copy()
                         
-                        # Jika masih terlalu banyak/kosong, gunakan metode pencocokan kata minimum
                         if history_match.empty:
                             mask_any = row_text.str.contains("|".join(core_keywords), case=False, na=False)
                             history_match = df_ata_subset[mask_any].copy()
 
                     if not history_match.empty:
-                        # Berikan skoring relevansi berdasarkan jumlah kecocokan kata kunci
                         history_match['Relevance_Score'] = history_match.astype(object).fillna('').astype(str).agg(' '.join, axis=1).apply(
                             lambda x: sum(10 for kw in core_keywords if kw in x.upper())
                         )
@@ -1388,8 +1432,24 @@ if st.button("Analisis Kasus & History", type="primary"):
                 else:
                     history_match = df_ata_subset.copy()
 
-            if not history_match.empty:
-                df_history_sorted = history_match.head(15).copy()
+            # --- SISTEM FALLBACK & FILTER 4-DIGIT PRESISI ---
+            df_gemini_trend = history_match.copy() if not history_match.empty else pd.DataFrame()
+            
+            search_pattern = ""
+            if selected_ata and len(selected_ata) >= 4:
+                main_ch = selected_ata.split('-')[0]
+                sub_digit = selected_ata.split('-')[1][0] if len(selected_ata.split('-')[1]) > 0 else "4"
+                search_pattern = f"{main_ch}-{sub_digit}"
+            
+            if not df_gemini_trend.empty and 'Corrective Action' in df_gemini_trend.columns and search_pattern:
+                df_strict = df_gemini_trend[df_gemini_trend['Corrective Action'].astype(str).str.contains(search_pattern, case=False, na=False)]
+                if not df_strict.empty:
+                    df_gemini_trend = df_strict
+
+            jumlah_filtered_match = len(df_gemini_trend)
+
+            if not df_gemini_trend.empty:
+                df_history_sorted = df_gemini_trend.head(15).copy()
                 df_history_sorted['Date_Parsed'] = pd.to_datetime(df_history_sorted['Date'], errors='coerce')
                 df_history_sorted = df_history_sorted.sort_values(by='Date_Parsed', ascending=False)
                 
@@ -1407,10 +1467,8 @@ if st.button("Analisis Kasus & History", type="primary"):
                 kolom_ringkas = ['Date', 'AML No', 'Note / Report', 'Corrective Action', 'P/N Off', 'P/N On', 'ATA']
                 kolom_tersedia = [c for c in kolom_ringkas if c in df_history_sorted.columns]
                 context_history = df_history_sorted[kolom_tersedia].to_string(index=False)
-                jumlah_match = len(history_match)
             else:
-                context_history = "Tidak ditemukan riwayat defect serupa di database armada ini."
-                jumlah_match = 0
+                context_history = "Tidak ditemukan riwayat defect serupa di sub-sistem ini."
                 date_range_info = "N/A"
                 df_history_sorted = pd.DataFrame()
 
@@ -1420,20 +1478,21 @@ if st.button("Analisis Kasus & History", type="primary"):
             st.session_state['selected_ata'] = selected_ata
             st.session_state['history_match'] = df_history_sorted
 
-            if jumlah_match >= 5:
+            if jumlah_filtered_match >= 5:
                 selected_method_instruction = """
-[METODE ANALISIS YANG WAJIB DIGUNAKAN: FISHBONE / ISHIKAWA DIAGRAM]
-1. Tuliskan terlebih dahulu paragraf ringkas "REPETITIVE DEFECT ANALYSIS" yang mengevaluasi frekuensi kejadian, kecenderungan berulang, dan tren histori kerusakan komponen ini pada armada.
-2. Selanjutnya, buatlah analisis Root Cause Analysis (RCA) menggunakan Diagram Fishbone / Ishikawa sederhana di dalam block code (menggunakan tanda triple backtick ``` ) dengan mengkategorikan penyebab ke dalam: Manpower, Machine/LRU, Material/Hardware, Method, dan Environment.
-"""
+            [METODE ANALISIS YANG WAJIB DIGUNAKAN: FISHBONE / ISHIKAWA DIAGRAM]
+            1. Tuliskan terlebih dahulu paragraf tinjauan tren & korelasi historis di awal.
+            2. Buatlah diagram Fishbone / Ishikawa menggunakan teks ASCII di dalam blok kode (``` ... ```).
+            3. SETELAH diagram Fishbone, wajib tuliskan paragraf analisis dan evaluasi mendalam yang mengulas poin-poin penyebab utama dari diagram tersebut (misalnya analisis faktor Machine, Material, Method, dan Environment).
+            """
             else:
                 selected_method_instruction = """
-[METODE ANALISIS YANG WAJIB DIGUNAKAN: 5 WHYS INVESTIGATION]
-1. Tuliskan terlebih dahulu paragraf ringkas "REPETITIVE DEFECT ANALYSIS" yang mengevaluasi frekuensi kejadian dan status kecenderungan insiden terisolasi pada armada.
-2. Selanjutnya, lakukan investigasi Root Cause Analysis (RCA) menggunakan metode penelusuran "5 Whys" (bertanya "Mengapa" sebanyak 5 tahapan secara berurutan mulai dari gejala permukaan hingga menemukan akar penyebab tunggal yang paling mendalam).
-"""
+            [METODE ANALISIS YANG WAJIB DIGUNAKAN: 5 WHYS INVESTIGATION]
+            1. Tuliskan paragraf tinjauan tren di awal.
+            2. Buat penelusuran 5 Whys di dalam blok kode (``` ... ```).
+            3. SETELAH penelusuran 5 Whys, wajib tuliskan paragraf evaluasi kesimpulan akar masalah.
+            """
 
-            # Tambahkan instruksi ke prompt jika user melampirkan file
             additional_file_instruction = ""
             if uploaded_file is not None:
                 additional_file_instruction = (
@@ -1449,12 +1508,13 @@ Anda adalah seorang pakar Reliability Engineering penerbangan spesialis armada {
 TIPE PESAWAT: {ac_type}
 REGISTRASI PESAWAT: {ac_reg if ac_reg else 'N/A'}
 KASUS BARU YANG DILAPORKAN:
-{kasus_baru} (ATA Chapter: {selected_ata if selected_ata else 'N/A'})
+{kasus_baru} (ATA Chapter Target: {selected_ata if selected_ata else 'N/A'})
 {additional_file_instruction}
 
-DATA HISTORI DARI DATABASE UNSCHEDULED ARMADA {ac_type}:
-- Total Ditemukan: {jumlah_match} record/kejadian defect serupa.
+DATA HISTORI DARI DATABASE UNSCHEDULED ARMADA {ac_type} (Spesifik Sub-sistem ATA {selected_ata}):
+- Total Ditemukan: {jumlah_filtered_match} record/kejadian defect serupa.
 - Periode Waktu Kejadian: {date_range_info}
+- Buatkan tabel Jumlah Defect Dalam Tiap bulan vs Bulan berdasarkan data spesifik sub-sistem ini.
 
 SAMPEL RECORD TERAKHIR DARI DATABASE UNSCHEDULED ARMADA {ac_type}:
 {context_history}
@@ -1485,7 +1545,6 @@ Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type
 
             with st.spinner(f"Menganalisis histori & dokumen lampiran armada {ac_type} via Gemini..."):
                 try:
-                    # Sertakan 'uploaded_file' dalam panggilan API
                     full_text = call_gemini_api(prompt, api_key_input, uploaded_file=uploaded_file)
                 except Exception as e:
                     st.error(f"⚠️ **Gagal terhubung ke Gemini API:** {e}")
@@ -1522,7 +1581,6 @@ Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type
                         text_id_sys = full_text
                         text_en_sys = full_text
 
-                    # Simpan Analisis Awal sebagai Iterasi Ke-0
                     initial_iteration = {
                         "iteration_index": 0,
                         "title": "Analisis Awal (Initial Reliability Evaluation)",
@@ -1538,7 +1596,6 @@ Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type
 
                     st.session_state['iterations'] = [initial_iteration]
 
-                    # Simpan Laporan dengan Kunci DAN Otomatis
                     report_key_label, dan_code = get_next_dan_key(ac_type, kasus_baru)
                     st.session_state['current_dan_key'] = report_key_label
                     
@@ -1557,6 +1614,9 @@ Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type
                         "history_match": df_history_to_save.to_dict(orient="records") if not df_history_sorted.empty else []
                     }
                     save_report_to_disk(report_key_label, report_payload)
+                    
+                    # Refresh halaman agar bagian 1 sampai 5 langsung muncul
+                    st.rerun()
 
 # ---------------------------------------------------------
 # HASIL TAMPILAN, DOWNLOAD PDF, & HISTORICAL RECORD
@@ -1572,7 +1632,6 @@ if 'iterations' in st.session_state and st.session_state['iterations']:
         f"**Defect / Kasus Dilaporkan:**\n{st.session_state.get('kasus_baru')}"
     )
     
-    # PERLOOPINGAN SELURUH ITERASI (AWAL HINGGA TERAKHIR) SECARA KRONOLOGIS
     for iter_data in st.session_state['iterations']:
         idx = iter_data.get('iteration_index', 0)
         
@@ -1586,77 +1645,73 @@ if 'iterations' in st.session_state and st.session_state['iterations']:
             st.caption(f"Waktu Update: {iter_data.get('timestamp', 'N/A')}")
             st.warning(f"**Feedback / Temuan Lapangan Engineer:**\n{iter_data.get('feedback', iter_data.get('feedback_text', 'N/A'))}")
 
-        st.markdown("### 2. SYSTEM DESCRIPTION & OPERATIONAL PRINCIPLES")
-        st.write(iter_data.get('ai_sys_id', iter_data.get('analysis_result', '')))
+        sys_text, rca_text, rec_text = "", "", ""
         
-        st.markdown("### 3. REPETITIVE DEFECT ANALYSIS & ROOT CAUSE ANALYSIS (RCA)")
-        st.write(iter_data.get('ai_rca_id', ''))
-        
-        st.markdown("### 4. CORRECTIVE & PREVENTIVE RECOMMENDATIONS")
-        st.write(iter_data.get('ai_rec_id', ''))# PERLOOPINGAN SELURUH ITERASI (AWAL HINGGA TERAKHIR) SECARA KRONOLOGIS
-    for iter_data in st.session_state['iterations']:
-        idx = iter_data.get('iteration_index', 0)
-        
-        if idx == 0:
-            st.markdown("---")
-            st.markdown("## 🔹 TAHAP 1: ANALISIS KELAYAKAN & RCA AWAL")
-            st.caption(f"Waktu Analisis: {iter_data.get('timestamp', 'N/A')}")
-        else:
-            st.markdown("---")
-            st.markdown(f"## 🔄 TAHAP {idx + 1}: {iter_data.get('title', f'Iterasi Ke-{idx}')}")
-            st.caption(f"Waktu Update: {iter_data.get('timestamp', 'N/A')}")
-            st.warning(f"**Feedback / Temuan Lapangan Engineer:**\n{iter_data.get('feedback', iter_data.get('feedback_text', 'N/A'))}")
-
-        # Ambil teks hasil analisis
         full_result = iter_data.get('analysis_result', '')
-        ai_sys = iter_data.get('ai_sys_id', '')
-        ai_rca = iter_data.get('ai_rca_id', '')
-        ai_rec = iter_data.get('ai_rec_id', '')
-
-        # Jika hasil analisis tersimpan sebagai satu kesatuan mentah (Iterasi Lanjutan)
-        if full_result and not (ai_sys or ai_rca or ai_rec):
-            # Parse otomatis berdasarkan tag jika ada
-            if "[SYSTEM]" in full_result or "[RCA]" in full_result or "[RECOMMENDATIONS]" in full_result:
-                parts_sys = full_result.split("[RCA]")
-                sys_part = parts_sys[0].replace("[SYSTEM]", "").replace("[BAHASA_INDONESIA]", "").strip()
-                
-                rca_part = ""
-                rec_part = ""
-                if len(parts_sys) > 1:
-                    parts_rec = parts_sys[1].split("[RECOMMENDATIONS]")
-                    rca_part = parts_rec[0].strip()
-                    if len(parts_rec) > 1:
-                        rec_part = parts_rec[1].split("[BAHASA_INGGRIS]")[0].strip()
-                
-                st.markdown("### 2. SYSTEM DESCRIPTION & OPERATIONAL PRINCIPLES")
-                st.write(sys_part)
-                
-                if rca_part:
-                    st.markdown("### 3. REPETITIVE DEFECT ANALYSIS & ROOT CAUSE ANALYSIS (RCA)")
-                    st.write(rca_part)
-                    
-                if rec_part:
-                    st.markdown("### 4. CORRECTIVE & PREVENTIVE RECOMMENDATIONS")
-                    st.write(rec_part)
-            else:
-                # Jika tidak ada tag khusus, tampilkan utuh sebagai Tampilan Analisis Lanjutan
-                st.markdown("### 2. HASIL EVALUASI & ANALISIS LANJUTAN")
-                st.write(full_result)
+        if full_result:
+            try:
+                if "[SYSTEM]" in full_result or "[RCA]" in full_result:
+                    parts_sys = full_result.split("[RCA]")
+                    sys_text = parts_sys[0].replace("[SYSTEM]", "").replace("[BAHASA_INDONESIA]", "").strip()
+                    if len(parts_sys) > 1:
+                        parts_rec = parts_sys[1].split("[RECOMMENDATIONS]")
+                        rca_text = parts_rec[0].strip()
+                        if len(parts_rec) > 1:
+                            rec_text = parts_rec[1].split("[BAHASA_INGGRIS]")[0].strip()
+                else:
+                    rca_text = full_result
+            except:
+                rca_text = full_result
         else:
-            # Tampilan standar untuk Tahap 1 / data terpisah
-            if ai_sys:
-                st.markdown("### 2. SYSTEM DESCRIPTION & OPERATIONAL PRINCIPLES")
-                st.write(ai_sys)
-            if ai_rca:
-                st.markdown("### 3. REPETITIVE DEFECT ANALYSIS & ROOT CAUSE ANALYSIS (RCA)")
-                st.write(ai_rca)
-            if ai_rec:
-                st.markdown("### 4. CORRECTIVE & PREVENTIVE RECOMMENDATIONS")
-                st.write(ai_rec)
+            sys_text = iter_data.get('ai_sys_id', '')
+            rca_text = iter_data.get('ai_rca_id', '')
+            rec_text = iter_data.get('ai_rec_id', '')
+
+        # 1. TAMPILKAN SYSTEM DESCRIPTION
+        if sys_text:
+            st.markdown("### 2. SYSTEM DESCRIPTION & OPERATIONAL PRINCIPLES")
+            st.markdown(sys_text)
+
+        # 2. TAMPILKAN RCA (URUTAN: REVIEW -> DIAGRAM -> ANALISIS PENUTUP DIAGRAM)
+        if rca_text:
+            st.markdown("### 3. REPETITIVE DEFECT ANALYSIS & ROOT CAUSE ANALYSIS (RCA)")
+            
+            # Bersihkan tag penanda dari Gemini
+            clean_rca = rca_text.replace("[RCA_REVIEW]", "").replace("[RCA]", "").strip()
+            
+            # Pisahkan menjadi 3 bagian jika ada blok kode diagram (```)
+            if "```" in clean_rca:
+                parts_code = clean_rca.split("```")
+                rca_before = parts_code[0].strip()                    # 1. Analisis/Tinjauan awal di atas diagram
+                diagram_content = "```" + parts_code[1] + "```"       # 2. Diagram Fishbone
+                rca_after = parts_code[2].strip() if len(parts_code) > 2 else "" # 3. Analisis/Review penutup di bawah diagram
+            else:
+                rca_before = clean_rca
+                diagram_content = ""
+                rca_after = ""
+            
+            # TAHAP 1: Tampilkan Tinjauan / Analisis Awal di atas diagram
+            if rca_before:
+                st.markdown(rca_before)
+            
+            # TAHAP 2: Tampilkan Diagram Fishbone di tengah
+            if diagram_content:
+                st.markdown(diagram_content)
+                
+            # TAHAP 3: Tampilkan Analisis / Review terhadap Diagram Fishbone di bawahnya
+            if rca_after:
+                st.markdown("#### Analisis & Evaluasi Root Cause:")
+                st.markdown(rca_after)
+            
+            st.markdown("---")
+            
+        # 4. TAMPILKAN RECOMMENDATIONS
+        if rec_text:
+            st.markdown("### 4. CORRECTIVE & PREVENTIVE RECOMMENDATIONS")
+            st.markdown(rec_text)
     
     st.divider()
 
-    # --- FITUR FEEDBACK LAPANGAN & DEEP-DIVE RCA ---
     with st.expander("🛠️ Tambahkan Hasil Eksekusi & Feedback Engineer (Analisis Lanjutan / Iterasi Baru)", expanded=False):
         feedback_text = st.text_area(
             "Masukkan hasil tindakan / temuan baru setelah rekomendasi dijalankan:",
@@ -1664,7 +1719,6 @@ if 'iterations' in st.session_state and st.session_state['iterations']:
             key="feedback_input_text"
         )
         
-        # 1. Tambahkan Widget Upload File untuk Feedback/Rektifikasi
         uploaded_feedback_file = st.file_uploader(
             "📎 Lampirkan Bukti Rektifikasi / Foto Temuan / PDF AML (Opsional):",
             type=["png", "jpg", "jpeg", "pdf"],
@@ -1672,25 +1726,20 @@ if 'iterations' in st.session_state and st.session_state['iterations']:
             key="feedback_file_uploader"
         )
         
-        # Preview jika file feedback berupa gambar
         if uploaded_feedback_file is not None and uploaded_feedback_file.type.startswith("image/"):
             st.image(uploaded_feedback_file, caption="Preview Bukti Rektifikasi / Temuan Baru", width=300)
 
-        # 2. Tombol Eksekusi Analisis Lanjutan
         if st.button("Jalankan Analisis Lanjutan (Deep-Dive RCA)", type="primary"):
             if not feedback_text.strip() and uploaded_feedback_file is None:
                 st.warning("⚠️ Masukkan catatan temuan perbaikan atau lampirkan file sebelum menjalankan analisis lanjutan.")
             else:
-                # Ambil API Key secara langsung dan aman dari st.session_state['user_api_key']
                 active_api_key = st.session_state.get('user_api_key', '').strip()
                 if not active_api_key:
                     st.error("⚠️ API Key tidak ditemukan di sidebar. Silakan masukkan API Key di panel sebelah kiri.")
                 else:
-                    # Inisialisasi list all_reports jika belum ada
                     if 'all_reports' not in locals() and 'all_reports' not in globals():
                         all_reports = load_reports_from_json() if 'load_reports_from_json' in globals() else []
 
-                    # Ambil atau buat objek current_report secara aman
                     active_dan = st.session_state.get('dan_code', None)
                     current_report = None
                     
@@ -1714,11 +1763,9 @@ if 'iterations' in st.session_state and st.session_state['iterations']:
                         if 'all_reports' in locals():
                             all_reports.append(current_report)
 
-                    # Rangkai prompt iterasi dengan konteks investigasi sebelumnya
                     previous_iterations = current_report.get("iterations", [])
                     iteration_number = len(previous_iterations) + 1
                     
-                    # Tambahkan catatan instruksi file jika ada lampiran
                     feedback_file_instruction = ""
                     if uploaded_feedback_file is not None:
                         feedback_file_instruction = (
@@ -1766,14 +1813,12 @@ Rekomendasi tindakan teknis lanjutan, pemeriksaan komponen sekunder, atau penyes
 
                     with st.spinner(f"Menganalisis feedback & lampiran rektifikasi iterasi ke-{iteration_number}..."):
                         try:
-                            # Panggil Gemini API menggunakan active_api_key yang dipastikan ada
                             new_analysis_text = call_gemini_api(
                                 prompt_feedback, 
                                 active_api_key, 
                                 uploaded_file=uploaded_feedback_file
                             )
                             
-                            # Simpan iterasi baru ke dalam array 'iterations'
                             new_iteration = {
                                 "iteration_index": iteration_number,
                                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1786,7 +1831,6 @@ Rekomendasi tindakan teknis lanjutan, pemeriksaan komponen sekunder, atau penyes
                             current_report.setdefault("iterations", []).append(new_iteration)
                             st.session_state['iterations'].append(new_iteration)
                             
-                            # Simpan pembaruan ke saved_reports.json jika fungsi tersedia
                             if 'save_reports_to_json' in globals() and 'all_reports' in locals():
                                 save_reports_to_json(all_reports)
 
@@ -1796,13 +1840,9 @@ Rekomendasi tindakan teknis lanjutan, pemeriksaan komponen sekunder, atau penyes
                         except Exception as e:
                             st.error(f"⚠️ Gagal melakukan analisis lanjutan: {e}")
 
-# ==============================================================================
-# KELUAR DARI EXPANDER & ITERATIONS (RATA KIRI PENUH)
-# ==============================================================================
-
 st.markdown("---")
 
-# --- SECTION 1: DOWNLOAD LAPORAN PDF (MANDIRI DI HALAMAN UTAMA) ---
+# --- SECTION 1: DOWNLOAD LAPORAN PDF ---
 col_pdf1, col_pdf2 = st.columns([2, 2])
 with col_pdf1:
     pdf_lang = st.radio(
@@ -1815,7 +1855,6 @@ with col_pdf1:
 lang_code = "id" if pdf_lang == "Bahasa Indonesia" else "en"
 df_hist_pdf = st.session_state.get('history_match', pd.DataFrame())
 
-# Generate PDF secara aman
 try:
     pdf_data = generate_pdf_report(
         st.session_state.get('ac_type', 'AIRCRAFT'),
@@ -1839,7 +1878,7 @@ with col_pdf2:
             type="primary"
         )
 
-# --- SECTION 2: HISTORICAL RECORD (MANDIRI DI HALAMAN UTAMA) ---
+# --- SECTION 2: HISTORICAL RECORD ---
 st.markdown("---")
 st.subheader(f"5. HISTORICAL RECORD (Database Unscheduled {st.session_state.get('ac_type', '')} - {len(df_hist_pdf)} Record Ditemukan):")
 
