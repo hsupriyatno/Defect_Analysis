@@ -1922,12 +1922,26 @@ with st.form("eo_form"):
 if generate_eo_btn:
     with st.spinner("Membaca dokumen referensi PDF & menyusun draf EO Form ATD-F-308..."):
         try:
-            # 1. Konfigurasi menggunakan API key resmi yang sukses
-            API_KEY = "AQ.Ab8RN6LEuJfRe4nvItnmg-6HgIzzn6f52KUe98HWVy-PG3wCow"
-            genai.configure(api_key=API_KEY)
+            # 1. Gunakan SDK baru
+            from google import genai
+            from fpdf import FPDF
 
-            # 2. Menggunakan versi model yang stabil
-            active_model = genai.GenerativeModel('gemini-3.8-flash')
+            API_KEY = "AQ.Ab8RN6LEuJfRe4nvItnmg-6HgIzzn6f52KUe98HWVy-PG3wCow"
+            
+            # Inisialisasi client baru sesuai potongan kode di gambar
+            client = genai.Client(api_key=API_KEY)
+
+            # (... proses pembacaan PDF referensi & penyusunan prompt_eo tetap di sini ...)
+
+            # 2. Panggil generate content menggunakan SDK baru
+            response = client.models.generate_content(
+                model='gemini-3.8-flash',
+                contents=prompt_eo,
+            )
+            generated_eo_text = response.text
+
+            st.success("Draf Engineering Order (Form ATD-F-308) berhasil disusun!")
+            st.code(generated_eo_text, language="markdown")
 
             # 3. Ekstraksi teks dari file pendukung (PDF/TXT)
             ref_text_content = ""
