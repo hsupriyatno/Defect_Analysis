@@ -8,7 +8,8 @@ import json
 import base64
 import os
 from datetime import datetime
-
+import pdfplumber  # Pastikan pdfplumber sudah terinstall (pip install pdfplumber)
+import tempfile
 # Import modul ReportLab untuk PDF
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
@@ -1886,3 +1887,120 @@ if not df_hist_pdf.empty:
     st.dataframe(df_hist_pdf, use_container_width=True)
 else:
     st.info("Tidak ada catatan riwayat histori yang ditemukan.")
+
+import streamlit as st
+import io
+
+# =========================================================
+# MODUL ENGINEERING ORDER (EO) GENERATOR (Airfast Indonesia Standard)
+# =========================================================
+st.markdown("---")
+st.subheader("🛠️ Engineering Order (EO) Generator (Form ATD-F-308)")
+st.markdown("Gunakan modul ini untuk menghasilkan draf Engineering Order formal berstandar Airfast Indonesia berdasarkan hasil analisis dan dokumen referensi manual (AMM/WDM/FTD).")
+
+with st.form("eo_form"):
+    col1, col2 = st.columns(2)
+    with col1:
+        eo_number = st.text_input("Nomor EO (Engineering Order)", value="EO-B38M/M33-00-1167 IR")
+        eo_title = st.text_input("Judul Subject EO", value="LIGHTS - GENERAL - FLIGHT COMPARTMENT DOOR HEADER WIRE BUNDLE INSPECTION AND PROTECTION")
+        compliance_category = st.selectbox("Klasifikasi Compliance", ["Mandatory / Urgent", "Recommended / Fleet Improvement", "Routine Inspection"])
+    with col2:
+        compliance_time = st.text_input("Batas Waktu Pelaksanaan (Compliance)", value="To be performed at next scheduled maintenance opportunity")
+        man_hours = st.text_input("Estimasi Man-Hours", value="2.30 Man-Hours / A/P Engineer")
+        part_number = st.text_input("Part Number / KIT Required", value="TOP KIT - RETROFIT KIT (P/N 002A0147-1)")
+
+    uploaded_refs = st.file_uploader(
+        "Unggah Dokumen Referensi Pendukung (AMM / WDM / FTD / SB)", 
+        type=["pdf", "txt", "docx"], 
+        accept_multiple_files=True
+    )
+
+    generate_eo_btn = st.form_submit_button("✨ Generate Draf Engineering Order (Form ATD-F-308)")
+
+# Pastikan di sini tidak ada indentasi (rata kiri) atau sejajar dengan with st.form jika di luar form:
+if generate_eo_btn:
+    with st.spinner("Membaca dokumen referensi PDF & menyusun draf EO Form ATD-F-308..."):
+        try:
+            import google.generativeai as genai
+
+            # 1. Konfigurasi menggunakan API key resmi yang sukses
+            API_KEY = "AQ.Ab8RN6LEuJfRe4nvItnmg-6HgIzzn6f52KUe98HWVy-PG3wCow"
+            genai.configure(api_key=API_KEY)
+
+            # 2. Menggunakan versi model yang stabil
+            active_model = genai.GenerativeModel('gemini-3.8-flash')
+
+            # 3. Ekstraksi teks dari file pendukung (PDF/TXT)
+            ref_text_content = ""
+            if uploaded_refs:
+                for file in uploaded_refs:
+                    ref_text_content += f"\n\n--- DOKUMEN REFERENSI: {file.name} ---\n"
+                    if file.name.lower().endswith('.pdf'):
+                        try:
+                            with pdfplumber.open(file) as pdf:
+                                for page_idx, page in enumerate(pdf.pages):
+                                    text = page.extract_text()
+                                    if text:
+                                        ref_text_content += f"[Halaman {page_idx+1}]\n{text}\n"
+                        except Exception as e:
+                            ref_text_content += f"(Gagal membaca PDF: {str(e)})\n"
+                    elif file.name.lower().endswith('.txt'):
+                        ref_text_content += file.read().decode('utf-8', errors='ignore')
+
+            # 4. Susun prompt profesional yang dinamis dan menyesuaikan input form
+            prompt_eo = f"""
+            Bertindaklah sebagai Senior Technical Services & Reliability Engineer di Airfast Indonesia.
+            Tugas Anda adalah menyusun draf Engineering Order (EO) formal berstandar tinggi mengikuti struktur Form ATD-F-308 secara presisi berdasarkan data input dan dokumen referensi pesawat yang dilampirkan.
+
+            DATA INPUT UTAMA:
+            - Nomor EO: {eo_number}
+            - Subject / Judul: {eo_title}
+            - ATA Chapter: Sesuaikan secara akurat dengan Subject/Defect (misal: ATA 34 untuk Altimeter/Navigasi, dll.)
+            - Aircraft Applicability: Deteksi dan sesuaikan jenis pesawat (misalnya De Havilland DHC-6 Twin Otter atau armada terkait) berdasarkan nomor registrasi atau dokumen referensi yang diunggah. Jangan gunakan armada Boeing jika pesawatnya DHC-6.
+            - Classification: {compliance_category} ({compliance_time})
+            - Estimasi Man Power: {man_hours}
+            - Material / Parts Required: {part_number}
+            
+            TEKS DOKUMEN REFERENSI / DEFECT YANG DIUNGGAH:
+            {ref_text_content if ref_text_content else "Gunakan referensi manual AMM/WDM/CMM yang relevan dengan tipe pesawat tersebut."}
+
+            INSTRUKSI FORMAT OUTPUT:
+            Susun dengan layout rapi menggunakan format Markdown persis seperti berikut:
+            # ENGINEERING ORDER (EO)
+            ==================================================
+            **EO NUMBER:** {eo_number}
+            **TITLE:** {eo_title}
+            **ATA CHAPTER:** (Isi sesuai ATA Chapter yang benar untuk kasus ini)
+            **AIRCRAFT APPLICABILITY:** (Isi sesuai tipe pesawat aktual, misal: DHC-6 Twin Otter)
+            **CLASSIFICATION:** {compliance_category} | **COMPLIANCE:** {compliance_time}
+            
+            ## 1. REASON & BACKGROUND
+            (Uraikan latar belakang investigasi defect, temuan operasional, dan referensi manual terkait secara teknis mendalam)
+            
+            ## 2. MATERIAL / PARTS & TOOLING REQUIRED
+            (Cantumkan part number, consumables, dan special tools yang dibutuhkan sesuai tipe pesawat)
+            
+            ## 3. ACCOMPLISHMENT INSTRUCTIONS (STEP-BY-STEP)
+            **Phase A: Safety & Preparation**
+            **Phase B: Inspection & Testing**
+            **Phase C: Component Removal & Installation / Rectification**
+            **Phase D: Operational Check & Return to Service**
+            ==================================================
+            """
+
+            # 5. Generate konten draf EO dari AI
+            response = active_model.generate_content(prompt_eo)
+            generated_eo_text = response.text
+
+            st.success("Draf Engineering Order (Form ATD-F-308) berhasil disusun dengan sukses!")
+            st.code(generated_eo_text, language="markdown")
+
+            st.download_button(
+                label="📥 Unduh Dokumen Draf EO (.txt / .md)",
+                data=generated_eo_text,
+                file_name=f"{eo_number.replace('/', '_')}_Form_ATD-F-308.txt",
+                mime="text/plain"
+            )
+
+        except Exception as e:
+            st.error(f"Gagal menghasilkan draf EO dari AI: {e}")
