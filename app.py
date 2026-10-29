@@ -1923,14 +1923,12 @@ if generate_eo_btn:
         try:
             import google.generativeai as genai
 
-            # 1. Konfigurasi menggunakan API key resmi yang sukses
+            # 1. Konfigurasi API Resmi
             API_KEY = "AQ.Ab8RN6LEuJfRe4nvItnmg-6HgIzzn6f52KUe98HWVy-PG3wCow"
             genai.configure(api_key=API_KEY)
-
-            # 2. Menggunakan versi model yang stabil
             active_model = genai.GenerativeModel('gemini-3.8-flash')
 
-            # 3. Ekstraksi teks dari file pendukung (PDF/TXT)
+            # 2. Ekstraksi teks dari file referensi (PDF/TXT)
             ref_text_content = ""
             if uploaded_refs:
                 for file in uploaded_refs:
@@ -1947,7 +1945,7 @@ if generate_eo_btn:
                     elif file.name.lower().endswith('.txt'):
                         ref_text_content += file.read().decode('utf-8', errors='ignore')
 
-            # 4. Susun prompt profesional yang dinamis dan menyesuaikan input form
+            # 3. Susun prompt profesional yang dinamis
             prompt_eo = f"""
             Bertindaklah sebagai Senior Technical Services & Reliability Engineer di Airfast Indonesia.
             Tugas Anda adalah menyusun draf Engineering Order (EO) formal berstandar tinggi mengikuti struktur Form ATD-F-308 secara presisi berdasarkan data input dan dokumen referensi pesawat yang dilampirkan.
@@ -1955,51 +1953,77 @@ if generate_eo_btn:
             DATA INPUT UTAMA:
             - Nomor EO: {eo_number}
             - Subject / Judul: {eo_title}
-            - ATA Chapter: Sesuaikan secara akurat dengan Subject/Defect (misal: ATA 34 untuk Altimeter/Navigasi, dll.)
-            - Aircraft Applicability: Deteksi dan sesuaikan jenis pesawat (misalnya De Havilland DHC-6 Twin Otter atau armada terkait) berdasarkan nomor registrasi atau dokumen referensi yang diunggah. Jangan gunakan armada Boeing jika pesawatnya DHC-6.
+            - ATA Chapter: Sesuaikan secara akurat dengan Subject/Defect
+            - Aircraft Applicability: Deteksi dan sesuaikan jenis pesawat berdasarkan nomor registrasi atau dokumen referensi yang diunggah.
             - Classification: {compliance_category} ({compliance_time})
             - Estimasi Man Power: {man_hours}
             - Material / Parts Required: {part_number}
             
             TEKS DOKUMEN REFERENSI / DEFECT YANG DIUNGGAH:
-            {ref_text_content if ref_text_content else "Gunakan referensi manual AMM/WDM/CMM yang relevan dengan tipe pesawat tersebut."}
+            {ref_text_content if ref_text_content else "Gunakan referensi manual AMM/WDM/CMM yang relevan."}
 
             INSTRUKSI FORMAT OUTPUT:
-            Susun dengan layout rapi menggunakan format Markdown persis seperti berikut:
-            # ENGINEERING ORDER (EO)
-            ==================================================
-            **EO NUMBER:** {eo_number}
-            **TITLE:** {eo_title}
-            **ATA CHAPTER:** (Isi sesuai ATA Chapter yang benar untuk kasus ini)
-            **AIRCRAFT APPLICABILITY:** (Isi sesuai tipe pesawat aktual, misal: DHC-6 Twin Otter)
-            **CLASSIFICATION:** {compliance_category} | **COMPLIANCE:** {compliance_time}
-            
-            ## 1. REASON & BACKGROUND
-            (Uraikan latar belakang investigasi defect, temuan operasional, dan referensi manual terkait secara teknis mendalam)
-            
-            ## 2. MATERIAL / PARTS & TOOLING REQUIRED
-            (Cantumkan part number, consumables, dan special tools yang dibutuhkan sesuai tipe pesawat)
-            
-            ## 3. ACCOMPLISHMENT INSTRUCTIONS (STEP-BY-STEP)
-            **Phase A: Safety & Preparation**
-            **Phase B: Inspection & Testing**
-            **Phase C: Component Removal & Installation / Rectification**
-            **Phase D: Operational Check & Return to Service**
-            ==================================================
+            Susun dengan layout rapi menggunakan format Markdown standar Form ATD-F-308.
             """
 
-            # 5. Generate konten draf EO dari AI
+            # 4. Generate teks dari AI
             response = active_model.generate_content(prompt_eo)
             generated_eo_text = response.text
 
-            st.success("Draf Engineering Order (Form ATD-F-308) berhasil disusun dengan sukses!")
+            st.success("Draf Engineering Order (Form ATD-F-308) berhasil disusun!")
             st.code(generated_eo_text, language="markdown")
 
+            # 5. MODUL UNDUH PDF FORM ATD-F-308 BERBASIS FPDF2
+            from fpdf import FPDF
+
+            class AirfastEOPDF(FPDF):
+                def header(self):
+                    # Header Kop Surat Standar Perusahaan
+                    self.set_font('Helvetica', 'B', 11)
+                    self.cell(0, 6, 'AIRFAST INDONESIA - ENGINEERING ORDER (ATD-F-308)', 0, 1, 'C')
+                    self.set_font('Helvetica', 'I', 8)
+                    self.cell(0, 4, 'Technical Services & Reliability Engineering Department', 0, 1, 'C')
+                    self.line(10, 18, 200, 18)
+                    self.ln(4)
+
+                def footer(self):
+                    # Footer Halaman
+                    self.set_y(-15)
+                    self.set_font('Helvetica', 'I', 8)
+                    self.cell(0, 10, f'Page {self.page_no()}/{{nb}} - Airfast Indonesia Confidential', 0, 0, 'C')
+
+            # Inisialisasi obyek PDF ukuran A4
+            pdf = AirfastEOPDF(orientation='P', unit='mm', format='A4')
+            pdf.alias_nb_pages()
+            pdf.add_page()
+            pdf.set_font("Helvetica", size=9)
+
+            # Proses perataan teks draf EO dari hasil generate AI ke dalam PDF
+            for line in generated_eo_text.split('\n'):
+                # Membersihkan format markdown tebal/miring agar bersih tercetak di PDF
+                clean_line = line.replace('**', '').replace('##', '').replace('#', '').strip()
+                
+                if line.startswith('#'):
+                    pdf.ln(2)
+                    pdf.set_font("Helvetica", 'B', 10)
+                    pdf.set_text_color(0, 43, 73) # Warna biru gelap ala Airfast
+                    pdf.cell(0, 6, clean_line, ln=True)
+                    pdf.set_font("Helvetica", size=9)
+                    pdf.set_text_color(34, 34, 34)
+                elif line.startswith('-') or line.startswith('*'):
+                    pdf.multi_cell(0, 5, f"   {clean_line}")
+                else:
+                    pdf.multi_cell(0, 5, clean_line if clean_line else " ")
+
+            # Render output biner PDF
+            pdf_bytes = pdf.output()
+
+            # Tombol Unduh Streamlit (PDF)
             st.download_button(
-                label="📥 Unduh Dokumen Draf EO (.txt / .md)",
-                data=generated_eo_text,
-                file_name=f"{eo_number.replace('/', '_')}_Form_ATD-F-308.txt",
-                mime="text/plain"
+                label="📄 Unduh Dokumen Form ATD-F-308 Resmi (.PDF)",
+                data=bytes(pdf_bytes),
+                file_name=f"{eo_number.replace('/', '_')}_Form_ATD_F_308.pdf",
+                mime="application/pdf"
             )
 
         except Exception as e:
