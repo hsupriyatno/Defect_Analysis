@@ -1922,8 +1922,6 @@ with st.form("eo_form"):
 if generate_eo_btn:
     with st.spinner("Membaca dokumen referensi PDF & menyusun draf EO Form ATD-F-308..."):
         try:
-            import google.generativeai as genai
-
             # 1. Konfigurasi menggunakan API key resmi yang sukses
             API_KEY = "AQ.Ab8RN6LEuJfRe4nvItnmg-6HgIzzn6f52KUe98HWVy-PG3wCow"
             genai.configure(api_key=API_KEY)
