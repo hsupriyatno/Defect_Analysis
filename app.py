@@ -7,7 +7,7 @@ import requests
 import json
 import base64
 import os
-import google.generativeai as genai
+import google-genai
 from datetime import datetime
 import pdfplumber  # Pastikan pdfplumber sudah terinstall (pip install pdfplumber)
 import tempfile
