@@ -5,3 +5,4 @@ requests
 reportlab
 google-genai
 pdfplumber
+fpdf2
