@@ -3,7 +3,6 @@ pandas
 openpyxl
 requests
 reportlab
-google-genai
 pdfplumber
 fpdf2
 google-generativeai
