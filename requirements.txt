@@ -6,3 +6,5 @@ reportlab
 google-genai
 pdfplumber
 fpdf2
+google-generativeai
+plotly
