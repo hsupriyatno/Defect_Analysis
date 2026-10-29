@@ -4,3 +4,4 @@ openpyxl
 requests
 reportlab
 google-genai
+pdfplumber
