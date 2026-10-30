@@ -17,18 +17,13 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 import os
 import google.generativeai as genai
+import os
+import google.generativeai as genai
 
-# 1. Masukkan token AQ... ke environment variable resmi
+# 1. Set environment variable token AQ... di paling atas (global aman)
 os.environ["GEMINI_API_KEY"] = "AQ.Ab8RN6LEuJfRe4nvItnmg-6HgIzzn6f52KUe98HWVy-PG3wCow"
-
-# 2. Konfigurasi dan panggil model
 genai.configure()
-active_model = genai.GenerativeModel('gemini-1.5-flash') # atau model yang sesuai
-
-# Pemanggilan isi prompt
-response = active_model.generate_content(prompt_eo)
-generated_eo_text = response.text# INISIALISASI SESSION STATE (WAJIB ADA DI AWAL SCRIPT)
-# ---------------------------------------------------------
+active_model = genai.GenerativeModel('gemini-1.5-flash')# ---------------------------------------------------------
 if "iterations" not in st.session_state:
     st.session_state["iterations"] = []
 
@@ -1928,22 +1923,10 @@ with st.form("eo_form"):
     generate_eo_btn = st.form_submit_button("✨ Generate Draf Engineering Order (Form ATD-F-308)")
 
 # Pastikan di sini tidak ada indentasi (rata kiri) atau sejajar dengan with st.form jika di luar form:
-if generate_eo_btn:
+if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
     with st.spinner("Membaca dokumen referensi PDF & menyusun draf EO Form ATD-F-308..."):
         try:
-            from google import genai
             from fpdf import FPDF
-
-            MY_TOKEN = "AQ.Ab8RN6LEuJfRe4nvItnmg-6HgIzzn6f52KUe98HWVy-PG3wCow"
-
-            # Inisialisasi client google-genai dengan melewatkannya sebagai Bearer Token di header HTTP
-            client = genai.Client(
-                http_options={
-                    "headers": {
-                        "Authorization": f"Bearer {MY_TOKEN}"
-                    }
-                }
-            )
 
             # 1. Ekstraksi teks dari file referensi (PDF/TXT)
             ref_text_content = ""
@@ -1962,7 +1945,7 @@ if generate_eo_btn:
                     elif file.name.lower().endswith('.txt'):
                         ref_text_content += file.read().decode('utf-8', errors='ignore')
 
-            # 2. Definisikan prompt_eo
+            # 2. Definisikan prompt_eo secara utuh di dalam tombol
             prompt_eo = f"""
             Bertindaklah sebagai Senior Technical Services & Reliability Engineer di Airfast Indonesia.
             Tugas Anda adalah menyusun draf Engineering Order (EO) formal berstandar tinggi mengikuti struktur Form ATD-F-308 secara presisi berdasarkan data input dan dokumen referensi pesawat yang dilampirkan.
@@ -1983,17 +1966,14 @@ if generate_eo_btn:
             Susun dengan layout rapi menggunakan format Markdown standar Form ATD-F-308.
             """
 
-            # 3. Panggil AI menggunakan client baru
-            response = client.models.generate_content(
-                model='gemini-3.8-flash',
-                contents=prompt_eo,
-            )
+            # 3. Panggil AI menggunakan active_model yang sudah dikonfigurasi di atas
+            response = active_model.generate_content(prompt_eo)
             generated_eo_text = response.text
 
             st.success("Draf Engineering Order (Form ATD-F-308) berhasil disusun!")
             st.code(generated_eo_text, language="markdown")
 
-            # 4. Modul PDF FPDF2 di bawahnya...
+            # 4. Modul FPDF2 untuk unduh dokumen PDF resmi
             class AirfastEOPDF(FPDF):
                 def header(self):
                     self.set_font('Helvetica', 'B', 11)
