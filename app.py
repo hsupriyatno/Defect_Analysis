@@ -17,24 +17,16 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from google import genai
-import google.auth.credentials
+from google.oauth2.credentials import Credentials
+from fpdf import FPDF
 
 MY_TOKEN = "AQ.Ab8RN6LEuJfRe4nvItnmg-6HgIzzn6f52KUe98HWVy-PG3wCow"
 
-# Buat objek kredensial token akses kustom secara eksplisit
-class BearerAuth(google.auth.credentials.Credentials):
-    def __init__(self, token):
-        self.token = token
-    def apply(self, headers):
-        headers['Authorization'] = f'Bearer {self.token}'
-    def before_request(self, request, method, url, headers):
-        headers['Authorization'] = f'Bearer {self.token}'
+# Bungkus token OAuth2 access token menggunakan Credentials resmi
+credentials = Credentials(token=MY_TOKEN)
 
-credentials = BearerAuth(MY_TOKEN)
-
-# Inisialisasi client dengan kredensial OAuth / Bearer tersebut
-client = genai.Client(credentials=credentials)
-# ---------------------------------------------------------
+# Inisialisasi client google-genai dengan kredensial tersebut
+client = genai.Client(credentials=credentials)# ---------------------------------------------------------
 # INISIALISASI SESSION STATE (WAJIB ADA DI AWAL SCRIPT)
 # ---------------------------------------------------------
 if "iterations" not in st.session_state:
