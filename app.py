@@ -7,7 +7,6 @@ import requests
 import json
 import base64
 import os
-import google.genai
 from datetime import datetime
 import pdfplumber  # Pastikan pdfplumber sudah terinstall (pip install pdfplumber)
 import tempfile
@@ -16,18 +15,19 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
-from google import genai
-from google.oauth2.credentials import Credentials
-from fpdf import FPDF
+import os
+import google.generativeai as genai
 
-MY_TOKEN = "AQ.Ab8RN6LEuJfRe4nvItnmg-6HgIzzn6f52KUe98HWVy-PG3wCow"
+# 1. Masukkan token AQ... ke environment variable resmi
+os.environ["GEMINI_API_KEY"] = "AQ.Ab8RN6LEuJfRe4nvItnmg-6HgIzzn6f52KUe98HWVy-PG3wCow"
 
-# Bungkus token OAuth2 access token menggunakan Credentials resmi
-credentials = Credentials(token=MY_TOKEN)
+# 2. Konfigurasi dan panggil model
+genai.configure()
+active_model = genai.GenerativeModel('gemini-1.5-flash') # atau model yang sesuai
 
-# Inisialisasi client google-genai dengan kredensial tersebut
-client = genai.Client(credentials=credentials)# ---------------------------------------------------------
-# INISIALISASI SESSION STATE (WAJIB ADA DI AWAL SCRIPT)
+# Pemanggilan isi prompt
+response = active_model.generate_content(prompt_eo)
+generated_eo_text = response.text# INISIALISASI SESSION STATE (WAJIB ADA DI AWAL SCRIPT)
 # ---------------------------------------------------------
 if "iterations" not in st.session_state:
     st.session_state["iterations"] = []
