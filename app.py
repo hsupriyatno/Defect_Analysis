@@ -15,15 +15,36 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
-import os
 import google.generativeai as genai
-import pdfplumber
 from fpdf import FPDF
 
-# Inisialisasi token AQ... di paling atas file
+# ==========================================
+# 1. KONFIGURASI AWAL (GLOBAL SCOPE)
+# ==========================================
 os.environ["GEMINI_API_KEY"] = "AQ.Ab8RN6LEuJfRe4nvItnmg-6HgIzzn6f52KUe98HWVy-PG3wCow"
 genai.configure()
 active_model = genai.GenerativeModel('gemini-1.5-flash')
+
+
+
+# ---------------------------------------------------------
+# INISIALISASI SESSION STATE (WAJIB ADA DI AWAL SCRIPT)
+# ---------------------------------------------------------
+if "iterations" not in st.session_state:
+    st.session_state["iterations"] = []
+
+if "ac_type" not in st.session_state:
+    st.session_state["ac_type"] = "B737-8"
+
+if "ac_reg" not in st.session_state:
+    st.session_state["ac_reg"] = ""
+
+if "selected_ata" not in st.session_state:
+    st.session_state["selected_ata"] = ""
+
+if "kasus_baru" not in st.session_state:
+    st.session_state["kasus_baru"] = ""
+
 # ---------------------------------------------------------
 # KONFIGURASI HALAMAN & CUSTOM CSS UNTUK MENAIKKAN LOGO
 # ---------------------------------------------------------
@@ -1881,37 +1902,40 @@ else:
 import streamlit as st
 import io
 
-# =========================================================
-# MODUL ENGINEERING ORDER (EO) GENERATOR (Airfast Indonesia Standard)
-# =========================================================
+# ==========================================
+# 1. KONFIGURASI AWAL (GLOBAL SCOPE)
+# ==========================================
+os.environ["GEMINI_API_KEY"] = "AQ.Ab8RN6LEuJfRe4nvItnmg-6HgIzzn6f52KUe98HWVy-PG3wCow"
+genai.configure()
+active_model = genai.GenerativeModel('gemini-1.5-flash')
+
+# ==========================================
+# 2. ANTARMUKA INPUT STREAMLIT
+# ==========================================
+st.title("Airfast Indonesia - Engineering Order Generator")
+st.subheader("Form ATD-F-308 Automation Module")
+
+eo_number = st.text_input("Nomor EO", "EO/2026/001")
+eo_title = st.text_input("Judul Subject EO", "CORRECTIVE & PREVENTIVE RECOMMENDATIONS - WEATHER RADAR")
+compliance_category = st.selectbox("Klasifikasi Compliance", ["Mandatory / Urgent", "Recommended", "Optional"])
+man_hours = st.text_input("Estimasi Man-Hours", "4 Man-Hours")
+part_number = st.text_input("Part Number / KIT Required", "N/A")
+
+uploaded_refs = st.file_uploader(
+    "Unggah Dokumen Referensi Pendukung (AMM / WDM / FTD / SB)", 
+    type=["pdf", "txt"], 
+    accept_multiple_files=True
+)
+
 st.markdown("---")
-st.subheader("🛠️ Engineering Order (EO) Generator (Form ATD-F-308)")
-st.markdown("Gunakan modul ini untuk menghasilkan draf Engineering Order formal berstandar Airfast Indonesia berdasarkan hasil analisis dan dokumen referensi manual (AMM/WDM/FTD).")
 
-with st.form("eo_form"):
-    col1, col2 = st.columns(2)
-    with col1:
-        eo_number = st.text_input("Nomor EO (Engineering Order)", value="EO-B38M/M33-00-1167 IR")
-        eo_title = st.text_input("Judul Subject EO", value="LIGHTS - GENERAL - FLIGHT COMPARTMENT DOOR HEADER WIRE BUNDLE INSPECTION AND PROTECTION")
-        compliance_category = st.selectbox("Klasifikasi Compliance", ["Mandatory / Urgent", "Recommended / Fleet Improvement", "Routine Inspection"])
-    with col2:
-        compliance_time = st.text_input("Batas Waktu Pelaksanaan (Compliance)", value="To be performed at next scheduled maintenance opportunity")
-        man_hours = st.text_input("Estimasi Man-Hours", value="2.30 Man-Hours / A/P Engineer")
-        part_number = st.text_input("Part Number / KIT Required", value="TOP KIT - RETROFIT KIT (P/N 002A0147-1)")
-
-    uploaded_refs = st.file_uploader(
-        "Unggah Dokumen Referensi Pendukung (AMM / WDM / FTD / SB)", 
-        type=["pdf", "txt", "docx"], 
-        accept_multiple_files=True
-    )
-
-    generate_eo_btn = st.form_submit_button("✨ Generate Draf Engineering Order (Form ATD-F-308)")
-
-# Pastikan di sini tidak ada indentasi (rata kiri) atau sejajar dengan with st.form jika di luar form:
+# ==========================================
+# 3. TOMBOL EKSEKUSI (GENERATE DRAF EO)
+# ==========================================
 if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
     with st.spinner("Membaca dokumen referensi PDF & menyusun draf EO Form ATD-F-308..."):
         try:
-            # 1. Ekstraksi teks dari file referensi (PDF/TXT)
+            # A. Ekstraksi teks dari file referensi (PDF/TXT)
             ref_text_content = ""
             if uploaded_refs:
                 for file in uploaded_refs:
@@ -1928,10 +1952,10 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
                     elif file.name.lower().endswith('.txt'):
                         ref_text_content += file.read().decode('utf-8', errors='ignore')
 
-            # 2. Definisikan prompt_eo
+            # B. Definisi prompt_eo secara aman di dalam tombol
             prompt_eo = f"""
             Bertindaklah sebagai Senior Technical Services & Reliability Engineer di Airfast Indonesia.
-            Tugas Anda adalah menyusun draf Engineering Order (EO) formal berstandar tinggi mengikuti struktur Form ATD-F-308 secara presisi.
+            Tugas Anda adalah menyusun draf Engineering Order (EO) formal berstandar tinggi mengikuti struktur Form ATD-F-308 secara presisi berdasarkan data input dan dokumen referensi pesawat yang dilampirkan.
 
             DATA INPUT UTAMA:
             - Nomor EO: {eo_number}
@@ -1944,17 +1968,17 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
             {ref_text_content if ref_text_content else "Gunakan referensi manual yang relevan."}
 
             INSTRUKSI FORMAT OUTPUT:
-            Susun dengan layout rapi menggunakan format Markdown standar Form ATD-F-308.
+            Susun dengan layout rapi menggunakan format Markdown standar Form ATD-F-308 (Reason of Issuance, Description, Accomplishment Instructions, Return to Service).
             """
 
-            # 3. Panggil AI
+            # C. Panggil AI menggunakan model yang sudah dikonfigurasi
             response = active_model.generate_content(prompt_eo)
             generated_eo_text = response.text
 
             st.success("Draf Engineering Order (Form ATD-F-308) berhasil disusun!")
             st.code(generated_eo_text, language="markdown")
 
-            # 4. Modul PDF FPDF2
+            # D. Modul PDF FPDF2 untuk unduh dokumen resmi
             class AirfastEOPDF(FPDF):
                 def header(self):
                     self.set_font('Helvetica', 'B', 11)
