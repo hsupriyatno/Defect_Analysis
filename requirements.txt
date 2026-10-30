@@ -5,5 +5,5 @@ requests
 reportlab
 pdfplumber
 fpdf2
-google-genai
+google-generativeai
 plotly
