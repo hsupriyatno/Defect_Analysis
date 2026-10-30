@@ -17,28 +17,13 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 import os
 import google.generativeai as genai
-import os
-import google.generativeai as genai
+import pdfplumber
+from fpdf import FPDF
 
-# 1. Set environment variable token AQ... di paling atas (global aman)
+# Inisialisasi token AQ... di paling atas file
 os.environ["GEMINI_API_KEY"] = "AQ.Ab8RN6LEuJfRe4nvItnmg-6HgIzzn6f52KUe98HWVy-PG3wCow"
 genai.configure()
-active_model = genai.GenerativeModel('gemini-1.5-flash')# ---------------------------------------------------------
-if "iterations" not in st.session_state:
-    st.session_state["iterations"] = []
-
-if "ac_type" not in st.session_state:
-    st.session_state["ac_type"] = "B737-8"
-
-if "ac_reg" not in st.session_state:
-    st.session_state["ac_reg"] = ""
-
-if "selected_ata" not in st.session_state:
-    st.session_state["selected_ata"] = ""
-
-if "kasus_baru" not in st.session_state:
-    st.session_state["kasus_baru"] = ""
-
+active_model = genai.GenerativeModel('gemini-1.5-flash')
 # ---------------------------------------------------------
 # KONFIGURASI HALAMAN & CUSTOM CSS UNTUK MENAIKKAN LOGO
 # ---------------------------------------------------------
@@ -1926,8 +1911,6 @@ with st.form("eo_form"):
 if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
     with st.spinner("Membaca dokumen referensi PDF & menyusun draf EO Form ATD-F-308..."):
         try:
-            from fpdf import FPDF
-
             # 1. Ekstraksi teks dari file referensi (PDF/TXT)
             ref_text_content = ""
             if uploaded_refs:
@@ -1945,35 +1928,33 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
                     elif file.name.lower().endswith('.txt'):
                         ref_text_content += file.read().decode('utf-8', errors='ignore')
 
-            # 2. Definisikan prompt_eo secara utuh di dalam tombol
+            # 2. Definisikan prompt_eo
             prompt_eo = f"""
             Bertindaklah sebagai Senior Technical Services & Reliability Engineer di Airfast Indonesia.
-            Tugas Anda adalah menyusun draf Engineering Order (EO) formal berstandar tinggi mengikuti struktur Form ATD-F-308 secara presisi berdasarkan data input dan dokumen referensi pesawat yang dilampirkan.
+            Tugas Anda adalah menyusun draf Engineering Order (EO) formal berstandar tinggi mengikuti struktur Form ATD-F-308 secara presisi.
 
             DATA INPUT UTAMA:
             - Nomor EO: {eo_number}
             - Subject / Judul: {eo_title}
-            - ATA Chapter: Sesuaikan secara akurat dengan Subject/Defect
-            - Aircraft Applicability: Deteksi dan sesuaikan jenis pesawat berdasarkan nomor registrasi atau dokumen referensi yang diunggah.
-            - Classification: {compliance_category} ({compliance_time})
+            - Classification: {compliance_category}
             - Estimasi Man Power: {man_hours}
             - Material / Parts Required: {part_number}
             
             TEKS DOKUMEN REFERENSI / DEFECT YANG DIUNGGAH:
-            {ref_text_content if ref_text_content else "Gunakan referensi manual AMM/WDM/CMM yang relevan."}
+            {ref_text_content if ref_text_content else "Gunakan referensi manual yang relevan."}
 
             INSTRUKSI FORMAT OUTPUT:
             Susun dengan layout rapi menggunakan format Markdown standar Form ATD-F-308.
             """
 
-            # 3. Panggil AI menggunakan active_model yang sudah dikonfigurasi di atas
+            # 3. Panggil AI
             response = active_model.generate_content(prompt_eo)
             generated_eo_text = response.text
 
             st.success("Draf Engineering Order (Form ATD-F-308) berhasil disusun!")
             st.code(generated_eo_text, language="markdown")
 
-            # 4. Modul FPDF2 untuk unduh dokumen PDF resmi
+            # 4. Modul PDF FPDF2
             class AirfastEOPDF(FPDF):
                 def header(self):
                     self.set_font('Helvetica', 'B', 11)
