@@ -1925,8 +1925,16 @@ if generate_eo_btn:
             from google import genai
             from fpdf import FPDF
 
-            API_KEY = "AQ.Ab8RN6LEuJfRe4nvItnmg-6HgIzzn6f52KUe98HWVy-PG3wCow"
-            client = genai.Client(api_key=API_KEY)
+            MY_TOKEN = "AQ.Ab8RN6LEuJfRe4nvItnmg-6HgIzzn6f52KUe98HWVy-PG3wCow"
+
+            # Inisialisasi client google-genai dengan melewatkannya sebagai Bearer Token di header HTTP
+            client = genai.Client(
+                http_options={
+                    "headers": {
+                        "Authorization": f"Bearer {MY_TOKEN}"
+                    }
+                }
+            )
 
             # 1. Ekstraksi teks dari file referensi (PDF/TXT)
             ref_text_content = ""
@@ -1945,7 +1953,7 @@ if generate_eo_btn:
                     elif file.name.lower().endswith('.txt'):
                         ref_text_content += file.read().decode('utf-8', errors='ignore')
 
-            # 2. DEFINISIKAN PROMPT DI SINI (Agar 'prompt_eo' terbaca)
+            # 2. Definisikan prompt_eo
             prompt_eo = f"""
             Bertindaklah sebagai Senior Technical Services & Reliability Engineer di Airfast Indonesia.
             Tugas Anda adalah menyusun draf Engineering Order (EO) formal berstandar tinggi mengikuti struktur Form ATD-F-308 secara presisi berdasarkan data input dan dokumen referensi pesawat yang dilampirkan.
@@ -1966,7 +1974,7 @@ if generate_eo_btn:
             Susun dengan layout rapi menggunakan format Markdown standar Form ATD-F-308.
             """
 
-            # 3. Panggil AI menggunakan variabel prompt_eo yang sudah dibuat
+            # 3. Panggil AI menggunakan client baru
             response = client.models.generate_content(
                 model='gemini-3.8-flash',
                 contents=prompt_eo,
