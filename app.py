@@ -21,9 +21,9 @@ from fpdf import FPDF
 # ==========================================
 # 1. KONFIGURASI AWAL (GLOBAL SCOPE)
 # ==========================================
-os.environ["GEMINI_API_KEY"] = "AQ.Ab8RN6LEuJfRe4nvItnmg-6HgIzzn6f52KUe98HWVy-PG3wCow"
+os.environ["GEMINI_API_KEY"] = "AQ.Ab8RN6L4gSGmyGwkN7GsDehKTgJZSml6jCPGRyzClD_txCEyXw"
 genai.configure()
-active_model = genai.GenerativeModel('gemini-1.5-flash')
+active_model = genai.GenerativeModel('gemini-3.8-flash')
 
 
 
@@ -1903,14 +1903,7 @@ import streamlit as st
 import io
 
 # ==========================================
-# 1. KONFIGURASI AWAL (GLOBAL SCOPE)
-# ==========================================
-os.environ["GEMINI_API_KEY"] = "AQ.Ab8RN6LEuJfRe4nvItnmg-6HgIzzn6f52KUe98HWVy-PG3wCow"
-genai.configure()
-active_model = genai.GenerativeModel('gemini-1.5-flash')
-
-# ==========================================
-# 2. ANTARMUKA INPUT STREAMLIT
+# 2. ANTARMUKA INPUT FORMULIR STREAMLIT
 # ==========================================
 st.title("Airfast Indonesia - Engineering Order Generator")
 st.subheader("Form ATD-F-308 Automation Module")
@@ -1930,7 +1923,7 @@ uploaded_refs = st.file_uploader(
 st.markdown("---")
 
 # ==========================================
-# 3. TOMBOL EKSEKUSI (GENERATE DRAF EO)
+# 3. TOMBOL EKSEKUSI UTAMA (HANYA ADA 1 TOMBOL)
 # ==========================================
 if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
     with st.spinner("Membaca dokumen referensi PDF & menyusun draf EO Form ATD-F-308..."):
@@ -1971,27 +1964,29 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
             Susun dengan layout rapi menggunakan format Markdown standar Form ATD-F-308 (Reason of Issuance, Description, Accomplishment Instructions, Return to Service).
             """
 
-            # C. Panggil AI menggunakan model yang sudah dikonfigurasi
+            # C. Panggil AI menggunakan active_model yang sudah dikonfigurasi di atas
             response = active_model.generate_content(prompt_eo)
             generated_eo_text = response.text
 
             st.success("Draf Engineering Order (Form ATD-F-308) berhasil disusun!")
             st.code(generated_eo_text, language="markdown")
 
-            # D. Modul PDF FPDF2 untuk unduh dokumen resmi
+            # D. Modul PDF FPDF2 dengan Pembersih Garis Panjang (Anti-Crash)
+            import re
+
             class AirfastEOPDF(FPDF):
                 def header(self):
-                    self.set_font('Helvetica', 'B', 11)
-                    self.cell(0, 6, 'AIRFAST INDONESIA - ENGINEERING ORDER (ATD-F-308)', 0, 1, 'C')
+                    self.set_font('Helvetica', 'B', 10)
+                    self.cell(0, 5, 'AIRFAST INDONESIA - ENGINEERING ORDER (ATD-F-308)', 0, 1, 'C')
                     self.set_font('Helvetica', 'I', 8)
                     self.cell(0, 4, 'Technical Services & Reliability Engineering Department', 0, 1, 'C')
-                    self.line(10, 18, 200, 18)
-                    self.ln(4)
+                    self.line(10, 16, 200, 16)
+                    self.ln(3)
 
                 def footer(self):
-                    self.set_y(-15)
+                    self.set_y(-12)
                     self.set_font('Helvetica', 'I', 8)
-                    self.cell(0, 10, f'Page {self.page_no()}/{{nb}} - Airfast Indonesia Confidential', 0, 0, 'C')
+                    self.cell(0, 8, f'Page {self.page_no()}/{{nb}} - Airfast Indonesia Confidential', 0, 0, 'C')
 
             pdf = AirfastEOPDF(orientation='P', unit='mm', format='A4')
             pdf.alias_nb_pages()
@@ -1999,18 +1994,41 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
             pdf.set_font("Helvetica", size=9)
 
             for line in generated_eo_text.split('\n'):
-                clean_line = line.replace('**', '').replace('##', '').replace('#', '').strip()
+                # 1. Bersihkan tanda markdown & backticks
+                clean_line = line.replace('```', '').replace('**', '').replace('##', '').replace('#', '').strip()
+                
+                # 2. Jika ketemu garis pembatas panjang (====, ----, ____), ubah jadi garis PDF resmi
+                if re.match(r'^[=\-_]{3,}$', clean_line):
+                    pdf.ln(1)
+                    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+                    pdf.ln(2)
+                    continue
+
+                # 3. Potong kata/garis yang terlalu panjang tanpa spasi (misal _____________ )
+                words = clean_line.split(' ')
+                sanitized_words = []
+                for word in words:
+                    if len(word) > 35:  # Jika ada kata/garis lebih dari 35 karakter tanpa spasi
+                        word = word[:35]
+                    sanitized_words.append(word)
+                safe_line = " ".join(sanitized_words)
+
+                if not safe_line.strip():
+                    pdf.ln(2)
+                    continue
+
+                # 4. Cetak teks secara aman ke PDF
                 if line.startswith('#'):
                     pdf.ln(2)
                     pdf.set_font("Helvetica", 'B', 10)
                     pdf.set_text_color(0, 43, 73)
-                    pdf.cell(0, 6, clean_line, ln=True)
+                    pdf.multi_cell(0, 4.5, safe_line)
                     pdf.set_font("Helvetica", size=9)
                     pdf.set_text_color(34, 34, 34)
                 elif line.startswith('-') or line.startswith('*'):
-                    pdf.multi_cell(0, 5, f"   {clean_line}")
+                    pdf.multi_cell(0, 4.5, f"   {safe_line}")
                 else:
-                    pdf.multi_cell(0, 5, clean_line if clean_line else " ")
+                    pdf.multi_cell(0, 4.5, safe_line)
 
             pdf_bytes = pdf.output()
 
