@@ -21,7 +21,7 @@ from fpdf import FPDF
 # ==========================================
 # 1. KONFIGURASI AWAL (GLOBAL SCOPE)
 # ==========================================
-os.environ["GEMINI_API_KEY"] = "AQ.Ab8RN6Jn3TD3KMY8WzOGQzNA7qpRNPzLx7boATs8oRmzWnc54w"
+os.environ["GEMINI_API_KEY"] = "AQ.Ab8RN6Iu127Gtr-GKysWS0XsXaIaqa018dgDSKPA5fO9aBjsSA"
 genai.configure()
 active_model = genai.GenerativeModel('gemini-3.8-flash')
 
