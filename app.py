@@ -1976,7 +1976,7 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
             st.success("Draf Engineering Order (Form ATD-F-308) berhasil disusun!")
             st.code(generated_eo_text, language="markdown")
 
-            # D. Modul PDF FPDF2 dengan Pembersih Garis Panjang (Anti-Crash)
+            # D. Modul PDF FPDF2 dengan Sterilisasi Total (Anti-Crash Terakhir)
             class AirfastEOPDF(FPDF):
                 def header(self):
                     self.set_font('Helvetica', 'B', 10)
@@ -1997,19 +1997,19 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
             pdf.set_font("Helvetica", size=9)
 
             for line in generated_eo_text.split('\n'):
-                clean_line = line.replace('```markdown', '').replace('```', '').replace('**', '').replace('##', '').replace('#', '').strip()
+                # 1. Bersihkan markdown dan format tebal/miring
+                clean_line = line.replace('```text', '').replace('```markdown', '').replace('```', '').replace('**', '').replace('##', '').replace('#', '').strip()
                 
-                if re.match(r'^[=\-_]{3,}$', clean_line):
-                    pdf.ln(1)
-                    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-                    pdf.ln(2)
-                    continue
+                # 2. Sterilisasi total: Buang baris yang mengandung elemen tabel ASCII atau garis putus-putus
+                if '+' in clean_line or '|' in clean_line or re.match(r'^[=\-_]{3,}$', clean_line):
+                    continue  
 
+                # 3. Batasi panjang setiap kata agar tidak ada yang melebihi batas cetak kolom
                 words = clean_line.split(' ')
                 sanitized_words = []
                 for word in words:
-                    if len(word) > 35:
-                        word = word[:35]
+                    if len(word) > 25:  # Potong kata yang terlalu panjang tanpa spasi
+                        word = word[:25]
                     sanitized_words.append(word)
                 safe_line = " ".join(sanitized_words)
 
@@ -2017,6 +2017,7 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
                     pdf.ln(2)
                     continue
 
+                # 4. Cetak ke dokumen PDF secara aman
                 if line.startswith('#'):
                     pdf.ln(2)
                     pdf.set_font("Helvetica", 'B', 10)
