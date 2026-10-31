@@ -19,13 +19,17 @@ import google.generativeai as genai
 from fpdf import FPDF
 
 # ==========================================
-# 1. KONFIGURASI AWAL (GLOBAL SCOPE)
+# 1. SET TOKEN OAUTH / BEARER (AQ...)
 # ==========================================
-os.environ["GEMINI_API_KEY"] = "AQ.Ab8RN6Iu127Gtr-GKysWS0XsXaIaqa018dgDSKPA5fO9aBjsSA"
-genai.configure()
-active_model = genai.GenerativeModel('gemini-3.8-flash')
+# Mengambil token secara aman (bisa dari Streamlit Secrets Cloud atau Environment / Fallback Lokal)
+import os
+import streamlit as st
 
-
+# Mengambil token secara aman tanpa menyimpan token mentah di dalam kode
+try:
+    MY_TOKEN = st.secrets["GEMINI_API_KEY"]
+except Exception:
+    MY_TOKEN = os.getenv("GEMINI_API_KEY", "")
 
 # ---------------------------------------------------------
 # INISIALISASI SESSION STATE (WAJIB ADA DI AWAL SCRIPT)
@@ -1923,7 +1927,7 @@ uploaded_refs = st.file_uploader(
 st.markdown("---")
 
 # ==========================================
-# 3. TOMBOL EKSEKUSI UTAMA (HANYA ADA 1 TOMBOL)
+# 3. TOMBOL EKSEKUSI UTAMA (GENERATE DRAF EO)
 # ==========================================
 if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
     with st.spinner("Membaca dokumen referensi PDF & menyusun draf EO Form ATD-F-308..."):
@@ -1961,10 +1965,11 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
             {ref_text_content if ref_text_content else "Gunakan referensi manual yang relevan."}
 
             INSTRUKSI FORMAT OUTPUT:
-            Susun dengan layout rapi menggunakan format Markdown standar Form ATD-F-308 (Reason of Issuance, Description, Accomplishment Instructions, Return to Service).
+            Susun dengan layout rapi menggunakan format Markdown standar Form ATD-F-308 (Reason of Issuance, Description, Accomplishment Instructions, Return to Service, Authorization & Sign-Off).
             """
 
-            # C. Panggil AI menggunakan active_model yang sudah dikonfigurasi di atas
+            # C. Panggil AI menggunakan SDK resmi google.generativeai
+            active_model = genai.GenerativeModel('gemini-3.8-flash')
             response = active_model.generate_content(prompt_eo)
             generated_eo_text = response.text
 
@@ -1972,8 +1977,6 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
             st.code(generated_eo_text, language="markdown")
 
             # D. Modul PDF FPDF2 dengan Pembersih Garis Panjang (Anti-Crash)
-            import re
-
             class AirfastEOPDF(FPDF):
                 def header(self):
                     self.set_font('Helvetica', 'B', 10)
@@ -1994,21 +1997,18 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
             pdf.set_font("Helvetica", size=9)
 
             for line in generated_eo_text.split('\n'):
-                # 1. Bersihkan tanda markdown & backticks
-                clean_line = line.replace('```', '').replace('**', '').replace('##', '').replace('#', '').strip()
+                clean_line = line.replace('```markdown', '').replace('```', '').replace('**', '').replace('##', '').replace('#', '').strip()
                 
-                # 2. Jika ketemu garis pembatas panjang (====, ----, ____), ubah jadi garis PDF resmi
                 if re.match(r'^[=\-_]{3,}$', clean_line):
                     pdf.ln(1)
                     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
                     pdf.ln(2)
                     continue
 
-                # 3. Potong kata/garis yang terlalu panjang tanpa spasi (misal _____________ )
                 words = clean_line.split(' ')
                 sanitized_words = []
                 for word in words:
-                    if len(word) > 35:  # Jika ada kata/garis lebih dari 35 karakter tanpa spasi
+                    if len(word) > 35:
                         word = word[:35]
                     sanitized_words.append(word)
                 safe_line = " ".join(sanitized_words)
@@ -2017,7 +2017,6 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
                     pdf.ln(2)
                     continue
 
-                # 4. Cetak teks secara aman ke PDF
                 if line.startswith('#'):
                     pdf.ln(2)
                     pdf.set_font("Helvetica", 'B', 10)
