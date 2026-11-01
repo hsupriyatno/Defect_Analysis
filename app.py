@@ -1930,42 +1930,52 @@ st.markdown("---")
 # 3. TOMBOL EKSEKUSI UTAMA (GENERATE DRAF EO)
 # ==========================================
 if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
-    with st.spinner("Membaca dokumen referensi PDF & menyusun draf EO Form ATD-F-308..."):
+    with st.spinner("Reading reference PDF & generating English EO Form ATD-F-308 draft..."):
         try:
             # A. Ekstraksi teks dari file referensi (PDF/TXT)
             ref_text_content = ""
             if uploaded_refs:
                 for file in uploaded_refs:
-                    ref_text_content += f"\n\n--- DOKUMEN REFERENSI: {file.name} ---\n"
+                    ref_text_content += f"\n\n--- REFERENCE DOCUMENT: {file.name} ---\n"
                     if file.name.lower().endswith('.pdf'):
                         try:
                             with pdfplumber.open(file) as pdf:
                                 for page_idx, page in enumerate(pdf.pages):
                                     text = page.extract_text()
                                     if text:
-                                        ref_text_content += f"[Halaman {page_idx+1}]\n{text}\n"
+                                        ref_text_content += f"[Page {page_idx+1}]\n{text}\n"
                         except Exception as e:
-                            ref_text_content += f"(Gagal membaca PDF: {str(e)})\n"
+                            ref_text_content += f"(Failed to read PDF: {str(e)})\n"
                     elif file.name.lower().endswith('.txt'):
                         ref_text_content += file.read().decode('utf-8', errors='ignore')
 
-            # B. Definisi prompt_eo secara aman di dalam tombol
+            # B. Definisi prompt_eo dalam Bahasa Inggris penuh
             prompt_eo = f"""
-            Bertindaklah sebagai Senior Technical Services & Reliability Engineer di Airfast Indonesia.
-            Tugas Anda adalah menyusun draf Engineering Order (EO) formal berstandar tinggi mengikuti struktur Form ATD-F-308 secara presisi berdasarkan data input dan dokumen referensi pesawat yang dilampirkan.
+            Act as a Senior Technical Services & Reliability Engineer at PT Airfast Indonesia.
+            Your task is to draft a formal, high-standard Engineering Order (EO) following the exact structure of Form ATD-F-308, based on the provided input data and uploaded aircraft reference documents.
 
-            DATA INPUT UTAMA:
-            - Nomor EO: {eo_number}
-            - Subject / Judul: {eo_title}
+            MAIN INPUT DATA:
+            - EO Number: {eo_number}
+            - Subject / Title: {eo_title}
             - Classification: {compliance_category}
-            - Estimasi Man Power: {man_hours}
+            - Estimated Man Power: {man_hours}
             - Material / Parts Required: {part_number}
             
-            TEKS DOKUMEN REFERENSI / DEFECT YANG DIUNGGAH:
-            {ref_text_content if ref_text_content else "Gunakan referensi manual yang relevan."}
+            UPLOADED REFERENCE / DEFECT TEXT:
+            {ref_text_content if ref_text_content else "Use relevant standard manual references."}
 
-            INSTRUKSI FORMAT OUTPUT:
-            Susun dengan layout rapi menggunakan format Markdown standar Form ATD-F-308 (Reason of Issuance, Description, Accomplishment Instructions, Return to Service, Authorization & Sign-Off).
+            OUTPUT FORMAT INSTRUCTIONS:
+            - Write the entire draft in professional English.
+            - Follow the formal Airfast Indonesia Form ATD-F-308 structure precisely:
+              1. Reason of Issuance
+              2. Description & Background
+              3. Reference Documents (AMM, WDM, SB, etc.)
+              4. Compliance & Applicability
+              5. Tools & Parts Required
+              6. Man Power Estimation
+              7. Accomplishment Instructions (Step-by-step technical procedures)
+              8. Return to Service (RTS)
+              9. Authorization & Sign-Off (Prepared by, Checked by, Approved by)
             """
 
             # C. Panggil AI menggunakan SDK resmi google.generativeai
@@ -1973,71 +1983,10 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
             response = active_model.generate_content(prompt_eo)
             generated_eo_text = response.text
 
-            st.success("Draf Engineering Order (Form ATD-F-308) berhasil disusun!")
+            # D. Tampilkan hasil draf secara bersih dan profesional
+            st.success("Engineering Order (Form ATD-F-308) English draft successfully generated!")
+            st.markdown("### 📋 Official Engineering Order Draft (ATD-F-308 - English)")
             st.code(generated_eo_text, language="markdown")
 
-            # D. Modul PDF FPDF2 dengan Sterilisasi Total (Anti-Crash Terakhir)
-            class AirfastEOPDF(FPDF):
-                def header(self):
-                    self.set_font('Helvetica', 'B', 10)
-                    self.cell(0, 5, 'AIRFAST INDONESIA - ENGINEERING ORDER (ATD-F-308)', 0, 1, 'C')
-                    self.set_font('Helvetica', 'I', 8)
-                    self.cell(0, 4, 'Technical Services & Reliability Engineering Department', 0, 1, 'C')
-                    self.line(10, 16, 200, 16)
-                    self.ln(3)
-
-                def footer(self):
-                    self.set_y(-12)
-                    self.set_font('Helvetica', 'I', 8)
-                    self.cell(0, 8, f'Page {self.page_no()}/{{nb}} - Airfast Indonesia Confidential', 0, 0, 'C')
-
-            pdf = AirfastEOPDF(orientation='P', unit='mm', format='A4')
-            pdf.alias_nb_pages()
-            pdf.add_page()
-            pdf.set_font("Helvetica", size=9)
-
-            for line in generated_eo_text.split('\n'):
-                # 1. Bersihkan markdown dan format tebal/miring
-                clean_line = line.replace('```text', '').replace('```markdown', '').replace('```', '').replace('**', '').replace('##', '').replace('#', '').strip()
-                
-                # 2. Sterilisasi total: Buang baris yang mengandung elemen tabel ASCII atau garis putus-putus
-                if '+' in clean_line or '|' in clean_line or re.match(r'^[=\-_]{3,}$', clean_line):
-                    continue  
-
-                # 3. Batasi panjang setiap kata agar tidak ada yang melebihi batas cetak kolom
-                words = clean_line.split(' ')
-                sanitized_words = []
-                for word in words:
-                    if len(word) > 25:  # Potong kata yang terlalu panjang tanpa spasi
-                        word = word[:25]
-                    sanitized_words.append(word)
-                safe_line = " ".join(sanitized_words)
-
-                if not safe_line.strip():
-                    pdf.ln(2)
-                    continue
-
-                # 4. Cetak ke dokumen PDF secara aman
-                if line.startswith('#'):
-                    pdf.ln(2)
-                    pdf.set_font("Helvetica", 'B', 10)
-                    pdf.set_text_color(0, 43, 73)
-                    pdf.multi_cell(0, 4.5, safe_line)
-                    pdf.set_font("Helvetica", size=9)
-                    pdf.set_text_color(34, 34, 34)
-                elif line.startswith('-') or line.startswith('*'):
-                    pdf.multi_cell(0, 4.5, f"   {safe_line}")
-                else:
-                    pdf.multi_cell(0, 4.5, safe_line)
-
-            pdf_bytes = pdf.output()
-
-            st.download_button(
-                label="📄 Unduh Dokumen Form ATD-F-308 Resmi (.PDF)",
-                data=bytes(pdf_bytes),
-                file_name=f"{eo_number.replace('/', '_')}_Form_ATD_F_308.pdf",
-                mime="application/pdf"
-            )
-
         except Exception as e:
-            st.error(f"Gagal menghasilkan draf EO dari AI: {e}")
+            st.error(f"Failed to generate EO draft from AI: {e}")
