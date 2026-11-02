@@ -2015,18 +2015,20 @@ from fpdf import FPDF
 
 import os
 
+import os
+from fpdf import FPDF
+
 def create_eo_pdf_bytes(eo_text):
-    """Fungsi modular pembuat PDF yang aman di lokal maupun Streamlit Cloud (Linux)"""
+    """Fungsi modular pembuat PDF yang aman di lokal maupun Streamlit Cloud"""
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     
     # Margin kiri 8mm, margin kanan 4mm agar rapat ke tepi kanan
     pdf.set_margins(left=8, top=10, right=4)
     pdf.add_page()
     
-    # Cek font Calibri di folder lokal 'fonts/' (untuk Cloud) atau Windows C:/Windows/Fonts/ (untuk lokal)
     font_loaded = False
     
-    # 1. Cek folder repository proyek terlebih dahulu (untuk Streamlit Cloud / Linux)
+    # 1. Cek folder repository proyek 'fonts/' (untuk Streamlit Cloud / Linux)
     if os.path.exists("fonts/calibri.ttf"):
         try:
             pdf.add_font("Calibri", "", "fonts/calibri.ttf", uni=True)
@@ -2036,7 +2038,7 @@ def create_eo_pdf_bytes(eo_text):
         except Exception:
             pass
             
-    # 2. Jika belum, cek direktori Windows (untuk komputer lokal Bapak)
+    # 2. Cek direktori Windows (untuk komputer lokal Bapak)
     if not font_loaded and os.path.exists("C:/Windows/Fonts/calibri.ttf"):
         try:
             pdf.add_font("Calibri", "", "C:/Windows/Fonts/calibri.ttf", uni=True)
@@ -2046,7 +2048,7 @@ def create_eo_pdf_bytes(eo_text):
         except Exception:
             pass
             
-    # 3. Fallback terakhir jika tidak ketemu sama sekali
+    # 3. Fallback terakhir jika font kustom tidak ditemukan sama sekali
     if not font_loaded:
         font_name = "Arial"
 
@@ -2061,13 +2063,14 @@ def create_eo_pdf_bytes(eo_text):
     pdf.set_font(font_name, size=12)
     
     for line in eo_text.split('\n'):
-        # Bersihkan karakter khusus Unicode dan markdown agar aman di server manapun
+        # Bersihkan karakter khusus Unicode, simbol teknik (Ω, ±, °), dan markdown
         sanitized_line = (line.replace("–", "-")
                               .replace("—", "-")
                               .replace("“", '"')
                               .replace("”", '"')
                               .replace("‘", "'")
                               .replace("’", "'")
+                              .replace("Ω", "Ohm")
                               .replace("±", "+/-")
                               .replace("°", " deg ")
                               .replace("|", " ")
