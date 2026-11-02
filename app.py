@@ -1996,14 +1996,11 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
             """
 
             # D. Panggil Model AI
-            active_model = genai.GenerativeModel('gemini-3.8-flash')
+            active_model = genai.GenerativeModel('gemini-3.8-flash') # atau model yang Anda gunakan
             response = active_model.generate_content(prompt_eo)
-            generated_eo_text = response.text
-
-            # E. Tampilkan Hasil (Bagian Akhir Blok try)
-            st.success("Engineering Order (Form ATD-F-308) English draft successfully generated!")
-            st.markdown("### 📋 Official Engineering Order Draft (ATD-F-308 - English)")
-            st.code(generated_eo_text, language="markdown")
+            
+            # SIMPAN KE SESSION STATE AGAR TIDAK HILANG SAAT RERUN
+            st.session_state['generated_eo_text'] = response.text
 
         except Exception as e:
             st.error(f"Gagal memproses draf EO: {e}")
@@ -2086,6 +2083,7 @@ def create_eo_pdf_bytes(eo_text):
             
         # Gunakan cell dengan batasan karakter aman agar tidak error horizontal space
         max_chars = 95
+
         if len(sanitized_line) > max_chars:
             chunks = [sanitized_line[i:i+max_chars] for i in range(0, len(sanitized_line), max_chars)]
             for chunk in chunks:
@@ -2098,7 +2096,13 @@ def create_eo_pdf_bytes(eo_text):
 # ==========================================
 # 5. TAMPILKAN TOMBOL DOWNLOAD (Di luar blok try/except)
 # ==========================================
-if 'generated_eo_text' in locals() and generated_eo_text:
+if 'generated_eo_text' in st.session_state and st.session_state['generated_eo_text']:
+    generated_eo_text = st.session_state['generated_eo_text']
+    
+    st.success("Engineering Order (Form ATD-F-308) English draft successfully generated!")
+    st.markdown("### 📋 Official Engineering Order Draft (ATD-F-308 - English)")
+    st.code(generated_eo_text, language="markdown")
+
     st.markdown("---")
     pdf_bytes = create_eo_pdf_bytes(generated_eo_text)
     st.download_button(
