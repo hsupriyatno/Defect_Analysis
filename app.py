@@ -25,11 +25,8 @@ from fpdf import FPDF
 import os
 import streamlit as st
 
-# Mengambil token secara aman tanpa menyimpan token mentah di dalam kode
-try:
-    MY_TOKEN = st.secrets["GEMINI_API_KEY"]
-except Exception:
-    MY_TOKEN = os.getenv("GEMINI_API_KEY", "")
+api_key = os.environ.get("GEMINI_API_KEY", "GANTI_DENGAN_API_KEY_ANDA")
+genai.configure(api_key=api_key)
 
 # ---------------------------------------------------------
 # INISIALISASI SESSION STATE (WAJIB ADA DI AWAL SCRIPT)
@@ -179,13 +176,8 @@ def call_gemini_api(prompt_text, user_api_key="", uploaded_file=None):
     # 1. Prioritas utama: Ambil dari parameter yang dikirim ATAU dari session_state sidebar
     api_key = user_api_key.strip() if user_api_key else st.session_state.get('user_api_key', '').strip()
     
-    # 2. Fallback cadangan: Jika masih kosong, coba ambil dari st.secrets
     if not api_key:
-        try:
-            if "GEMINI_API_KEY" in st.secrets:
-                api_key = st.secrets["GEMINI_API_KEY"]
-        except Exception:
-            pass
+        api_key = os.environ.get("GEMINI_API_KEY", "")
 
     # 3. Jika benar-benar tidak ditemukan sama sekali
     if not api_key:
@@ -1910,17 +1902,23 @@ import io
 # 2. ANTARMUKA INPUT FORMULIR STREAMLIT
 # ==========================================
 st.title("Airfast Indonesia - Engineering Order Generator")
-st.subheader("Form ATD-F-308 Automation Module")
+st.subheader("Formulir Input Data Engineering Order")
 
 eo_number = st.text_input("Nomor EO", "EO/2026/001")
-eo_title = st.text_input("Judul Subject EO", "CORRECTIVE & PREVENTIVE RECOMMENDATIONS - WEATHER RADAR")
-compliance_category = st.selectbox("Klasifikasi Compliance", ["Mandatory / Urgent", "Recommended", "Optional"])
-man_hours = st.text_input("Estimasi Man-Hours", "4 Man-Hours")
-part_number = st.text_input("Part Number / KIT Required", "N/A")
+eo_title = st.text_input("Subject / Judul EO", "Inspection of Lavatory Door Mechanism")
+compliance_category = st.selectbox("Classification", ["Mandatory", "Recommended", "Optional"])
+man_hours = st.text_input("Estimasi Man Power", "2 Man-Hours")
+part_number = st.text_input("Material / Parts Required", "N/A")
 
-uploaded_refs = st.file_uploader(
-    "Unggah Dokumen Referensi Pendukung (AMM / WDM / FTD / SB)", 
-    type=["pdf", "txt"], 
+# <-- TARUH KODE PILIHAN ARMADA & UPLOAD DI SINI (SEBELUM TOMBOL GENERATE) -->
+aircraft_type = st.selectbox(
+    "Pilih Tipe Armada Pesawat",
+    ["DHC6_Twin_Otter", "Bell_412", "Boeing_737MAX"]
+)
+
+uploaded_custom_files = st.file_uploader(
+    "Unggah Dokumen Pendukung / Foto Defect Tambahan (Opsional)",
+    type=["pdf", "txt", "png", "jpg", "jpeg"],
     accept_multiple_files=True
 )
 
@@ -1930,63 +1928,82 @@ st.markdown("---")
 # 3. TOMBOL EKSEKUSI UTAMA (GENERATE DRAF EO)
 # ==========================================
 if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
-    with st.spinner("Reading reference PDF & generating English EO Form ATD-F-308 draft..."):
+    with st.spinner("Membaca manual referensi dari server & menyusun draf EO..."):
         try:
-            # A. Ekstraksi teks dari file referensi (PDF/TXT)
+            # Pastikan API key terkonfigurasi
+            api_key = os.environ.get("GEMINI_API_KEY", st.session_state.get('user_api_key', ''))
+            genai.configure(api_key=api_key)
+
             ref_text_content = ""
-            if uploaded_refs:
-                for file in uploaded_refs:
-                    ref_text_content += f"\n\n--- REFERENCE DOCUMENT: {file.name} ---\n"
+
+            # A. AMBIL REFERENSI OTOMATIS DARI FOLDER SERVER BERDASARKAN ARMADA
+            folder_path = os.path.join("reference_library", aircraft_type)
+            if os.path.exists(folder_path):
+                ref_files = [f for f in os.listdir(folder_path) if f.lower().endswith('.pdf')]
+                
+                for file_name in ref_files[:3]:  # Batasi beberapa file utama untuk efisiensi konteks
+                    file_path = os.path.join(folder_path, file_name)
+                    ref_text_content += f"\n\n--- SERVER MANUAL REF ({file_name}) ---\n"
+                    try:
+                        with pdfplumber.open(file_path) as pdf:
+                            for page_idx, page in enumerate(pdf.pages[:2]):  # Ambil halaman awal chapter
+                                text = page.extract_text()
+                                if text:
+                                    ref_text_content += f"[Page {page_idx+1}]\n{text}\n"
+                    except Exception as e:
+                        ref_text_content += f"(Failed to read server file: {str(e)})"
+
+            # B. AMBIL TAMBAHAN DARI UNGGAHAN USER (JIKA ADA)
+            if uploaded_custom_files:
+                for file in uploaded_custom_files:
+                    ref_text_content += f"\n\n--- USER UPLOAD ({file.name}) ---\n"
                     if file.name.lower().endswith('.pdf'):
-                        try:
-                            with pdfplumber.open(file) as pdf:
-                                for page_idx, page in enumerate(pdf.pages):
-                                    text = page.extract_text()
-                                    if text:
-                                        ref_text_content += f"[Page {page_idx+1}]\n{text}\n"
-                        except Exception as e:
-                            ref_text_content += f"(Failed to read PDF: {str(e)})\n"
+                        with pdfplumber.open(file) as pdf:
+                            for page_idx, page in enumerate(pdf.pages):
+                                text = page.extract_text()
+                                if text:
+                                    ref_text_content += f"[Page {page_idx+1}]\n{text}\n"
                     elif file.name.lower().endswith('.txt'):
                         ref_text_content += file.read().decode('utf-8', errors='ignore')
 
-            # B. Definisi prompt_eo dalam Bahasa Inggris penuh
+            # C. Definisikan Prompt AI dalam Bahasa Inggris
             prompt_eo = f"""
             Act as a Senior Technical Services & Reliability Engineer at PT Airfast Indonesia.
-            Your task is to draft a formal, high-standard Engineering Order (EO) following the exact structure of Form ATD-F-308, based on the provided input data and uploaded aircraft reference documents.
+            Your task is to draft a formal, high-standard Engineering Order (EO) following Form ATD-F-308 based on the server reference manuals and user inputs.
 
-            MAIN INPUT DATA:
+            SELECTED AIRCRAFT FLEET: {aircraft_type}
             - EO Number: {eo_number}
-            - Subject / Title: {eo_title}
+            - Subject: {eo_title}
             - Classification: {compliance_category}
             - Estimated Man Power: {man_hours}
             - Material / Parts Required: {part_number}
             
-            UPLOADED REFERENCE / DEFECT TEXT:
-            {ref_text_content if ref_text_content else "Use relevant standard manual references."}
+            REFERENCE TEXT EXTRACTED (SERVER & USER):
+            {ref_text_content if ref_text_content else "Use standard fleet references."}
 
             OUTPUT FORMAT INSTRUCTIONS:
             - Write the entire draft in professional English.
             - Follow the formal Airfast Indonesia Form ATD-F-308 structure precisely:
               1. Reason of Issuance
               2. Description & Background
-              3. Reference Documents (AMM, WDM, SB, etc.)
+              3. Reference Documents
               4. Compliance & Applicability
               5. Tools & Parts Required
               6. Man Power Estimation
-              7. Accomplishment Instructions (Step-by-step technical procedures)
+              7. Accomplishment Instructions
               8. Return to Service (RTS)
-              9. Authorization & Sign-Off (Prepared by, Checked by, Approved by)
+              9. Authorization & Sign-Off
             """
 
-            # C. Panggil AI menggunakan SDK resmi google.generativeai
+            # D. Panggil Model AI
             active_model = genai.GenerativeModel('gemini-3.8-flash')
             response = active_model.generate_content(prompt_eo)
             generated_eo_text = response.text
 
-            # D. Tampilkan hasil draf secara bersih dan profesional
+            # E. Tampilkan Hasil
             st.success("Engineering Order (Form ATD-F-308) English draft successfully generated!")
             st.markdown("### 📋 Official Engineering Order Draft (ATD-F-308 - English)")
             st.code(generated_eo_text, language="markdown")
 
         except Exception as e:
-            st.error(f"Failed to generate EO draft from AI: {e}")
+            st.error(f"Gagal memproses draf EO: {e}")
