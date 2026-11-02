@@ -17,6 +17,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 import google.generativeai as genai
 from fpdf import FPDF
+from fpdf.errors import FPDFException
 
 # ==========================================
 # 1. SET TOKEN OAUTH / BEARER (AQ...)
@@ -2008,15 +2009,12 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
 # ==========================================
 # 4. MODUL PEMBUAT PDF (Ditaruh di luar blok tombol)
 # ==========================================
-from fpdf import FPDF
-
-import os
 
 import os
 from fpdf import FPDF
 
 def create_eo_pdf_bytes(eo_text):
-    """Fungsi modular pembuat PDF yang aman di lokal maupun Streamlit Cloud"""
+    """Fungsi pembuat PDF rapi, mengalir utuh, tanpa terpotong atau loncat-loncat"""
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     
     # Margin kiri 8mm, margin kanan 4mm agar rapat ke tepi kanan
@@ -2045,22 +2043,22 @@ def create_eo_pdf_bytes(eo_text):
         except Exception:
             pass
             
-    # 3. Fallback terakhir jika font kustom tidak ditemukan sama sekali
+    # 3. Fallback jika font kustom tidak ditemukan
     if not font_loaded:
         font_name = "Arial"
 
     # Header Dokumen Perusahaan
     pdf.set_font(font_name, "B", 14)
-    pdf.cell(0, 8, "PT AIRFAST INDONESIA", 0, 1, "C")
+    pdf.cell(0, 8, "PT AIRFAST INDONESIA", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.set_font(font_name, "B", 11)
-    pdf.cell(0, 6, "ENGINEERING ORDER - FORM ATD-F-308", 0, 1, "C")
+    pdf.cell(0, 6, "ENGINEERING ORDER - FORM ATD-F-308", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(4)
     
-    # Isi Konten Draf EO
-    pdf.set_font(font_name, size=12)
+    # Isi Konten Draf EO dengan font ukuran 11
+    pdf.set_font(font_name, size=11)
     
     for line in eo_text.split('\n'):
-        # Bersihkan karakter khusus Unicode, simbol teknik (Ω, ±, °), dan markdown
+        # Bersihkan karakter khusus Unicode dan markdown
         sanitized_line = (line.replace("–", "-")
                               .replace("—", "-")
                               .replace("“", '"')
@@ -2078,18 +2076,11 @@ def create_eo_pdf_bytes(eo_text):
                               .strip())
         
         if not sanitized_line:
-            pdf.ln(4) # Spasi antar baris kosong
+            pdf.ln(3) # Spasi antar baris kosong
             continue
             
-        # Gunakan cell dengan batasan karakter aman agar tidak error horizontal space
-        max_chars = 95
-
-        if len(sanitized_line) > max_chars:
-            chunks = [sanitized_line[i:i+max_chars] for i in range(0, len(sanitized_line), max_chars)]
-            for chunk in chunks:
-                pdf.cell(0, 5.5, chunk, ln=True)
-        else:
-            pdf.cell(0, 5.5, sanitized_line, ln=True)
+        # Cetak baris paragraf secara utuh menggunakan multi_cell dengan arah perpindahan kursor yang jelas
+        pdf.multi_cell(0, 5.5, sanitized_line, align='L', new_x="LMARGIN", new_y="NEXT")
         
     return bytes(pdf.output())
 
