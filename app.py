@@ -2085,7 +2085,7 @@ def create_eo_pdf_bytes(eo_text):
             continue
             
         # Gunakan cell dengan batasan karakter aman agar tidak error horizontal space
-        max_chars = 97
+        max_chars = 95
         if len(sanitized_line) > max_chars:
             chunks = [sanitized_line[i:i+max_chars] for i in range(0, len(sanitized_line), max_chars)]
             for chunk in chunks:
