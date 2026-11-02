@@ -2000,10 +2000,84 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
             response = active_model.generate_content(prompt_eo)
             generated_eo_text = response.text
 
-            # E. Tampilkan Hasil
+            # E. Tampilkan Hasil (Bagian Akhir Blok try)
             st.success("Engineering Order (Form ATD-F-308) English draft successfully generated!")
             st.markdown("### 📋 Official Engineering Order Draft (ATD-F-308 - English)")
             st.code(generated_eo_text, language="markdown")
 
         except Exception as e:
             st.error(f"Gagal memproses draf EO: {e}")
+
+# ==========================================
+# 4. MODUL PEMBUAT PDF (Ditaruh di luar blok tombol)
+# ==========================================
+from fpdf import FPDF
+
+def create_eo_pdf_bytes(eo_text):
+    """Fungsi modular pembuat PDF dengan margin kanan lebih rapat dan mepet"""
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
+    
+    # Margin kiri 8mm, margin kanan dibuat sangat kecil (4mm) agar mepet ke kanan
+    pdf.set_margins(left=8, top=10, right=4)
+    pdf.add_page()
+    
+    # Memuat font Calibri dari Windows secara otomatis (dengan fallback aman ke Arial)
+    try:
+        pdf.add_font("Calibri", "", "C:/Windows/Fonts/calibri.ttf", uni=True)
+        pdf.add_font("Calibri", "B", "C:/Windows/Fonts/calibrib.ttf", uni=True)
+        font_name = "Calibri"
+    except Exception:
+        font_name = "Arial"
+
+    # Header Dokumen Perusahaan
+    pdf.set_font(font_name, "B", 14)
+    pdf.cell(0, 8, "PT AIRFAST INDONESIA", 0, 1, "C")
+    pdf.set_font(font_name, "B", 11)
+    pdf.cell(0, 6, "ENGINEERING ORDER - FORM ATD-F-308", 0, 1, "C")
+    pdf.ln(4)
+    
+    # Isi Konten Draf EO dengan font Calibri ukuran 12
+    pdf.set_font(font_name, size=12)
+    
+    for line in eo_text.split('\n'):
+        # Bersihkan karakter khusus Unicode dan markdown
+        sanitized_line = (line.replace("–", "-")
+                              .replace("—", "-")
+                              .replace("“", '"')
+                              .replace("”", '"')
+                              .replace("‘", "'")
+                              .replace("’", "'")
+                              .replace("|", " ")
+                              .replace("---", "")
+                              .replace("___", "")
+                              .replace("**", "")
+                              .replace("###", "")
+                              .strip())
+        
+        if not sanitized_line:
+            pdf.ln(4) # Spasi antar baris kosong
+            continue
+            
+        # Batasan karakter per baris disesuaikan menjadi 82 agar teks melebar ke kanan
+        max_chars = 100
+        if len(sanitized_line) > max_chars:
+            chunks = [sanitized_line[i:i+max_chars] for i in range(0, len(sanitized_line), max_chars)]
+            for chunk in chunks:
+                pdf.cell(0, 5.5, chunk, ln=True)
+        else:
+            pdf.cell(0, 5.5, sanitized_line, ln=True)
+        
+    return bytes(pdf.output())
+
+# ==========================================
+# 5. TAMPILKAN TOMBOL DOWNLOAD (Di luar blok try/except)
+# ==========================================
+if 'generated_eo_text' in locals() and generated_eo_text:
+    st.markdown("---")
+    pdf_bytes = create_eo_pdf_bytes(generated_eo_text)
+    st.download_button(
+        label="📥 Download Official Engineering Order (PDF)",
+        data=pdf_bytes,
+        file_name=f"EO_{eo_number}.pdf",
+        mime="application/pdf"
+    )
