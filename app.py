@@ -2013,20 +2013,41 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
 # ==========================================
 from fpdf import FPDF
 
+import os
+
 def create_eo_pdf_bytes(eo_text):
-    """Fungsi modular pembuat PDF dengan margin kanan lebih rapat dan mepet"""
+    """Fungsi modular pembuat PDF yang aman di lokal maupun Streamlit Cloud (Linux)"""
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     
-    # Margin kiri 8mm, margin kanan dibuat sangat kecil (4mm) agar mepet ke kanan
+    # Margin kiri 8mm, margin kanan 4mm agar rapat ke tepi kanan
     pdf.set_margins(left=8, top=10, right=4)
     pdf.add_page()
     
-    # Memuat font Calibri dari Windows secara otomatis (dengan fallback aman ke Arial)
-    try:
-        pdf.add_font("Calibri", "", "C:/Windows/Fonts/calibri.ttf", uni=True)
-        pdf.add_font("Calibri", "B", "C:/Windows/Fonts/calibrib.ttf", uni=True)
-        font_name = "Calibri"
-    except Exception:
+    # Cek font Calibri di folder lokal 'fonts/' (untuk Cloud) atau Windows C:/Windows/Fonts/ (untuk lokal)
+    font_loaded = False
+    
+    # 1. Cek folder repository proyek terlebih dahulu (untuk Streamlit Cloud / Linux)
+    if os.path.exists("fonts/calibri.ttf"):
+        try:
+            pdf.add_font("Calibri", "", "fonts/calibri.ttf", uni=True)
+            pdf.add_font("Calibri", "B", "fonts/calibrib.ttf", uni=True)
+            font_name = "Calibri"
+            font_loaded = True
+        except Exception:
+            pass
+            
+    # 2. Jika belum, cek direktori Windows (untuk komputer lokal Bapak)
+    if not font_loaded and os.path.exists("C:/Windows/Fonts/calibri.ttf"):
+        try:
+            pdf.add_font("Calibri", "", "C:/Windows/Fonts/calibri.ttf", uni=True)
+            pdf.add_font("Calibri", "B", "C:/Windows/Fonts/calibrib.ttf", uni=True)
+            font_name = "Calibri"
+            font_loaded = True
+        except Exception:
+            pass
+            
+    # 3. Fallback terakhir jika tidak ketemu sama sekali
+    if not font_loaded:
         font_name = "Arial"
 
     # Header Dokumen Perusahaan
@@ -2036,17 +2057,19 @@ def create_eo_pdf_bytes(eo_text):
     pdf.cell(0, 6, "ENGINEERING ORDER - FORM ATD-F-308", 0, 1, "C")
     pdf.ln(4)
     
-    # Isi Konten Draf EO dengan font Calibri ukuran 12
+    # Isi Konten Draf EO
     pdf.set_font(font_name, size=12)
     
     for line in eo_text.split('\n'):
-        # Bersihkan karakter khusus Unicode dan markdown
+        # Bersihkan karakter khusus Unicode dan markdown agar aman di server manapun
         sanitized_line = (line.replace("–", "-")
                               .replace("—", "-")
                               .replace("“", '"')
                               .replace("”", '"')
                               .replace("‘", "'")
                               .replace("’", "'")
+                              .replace("±", "+/-")
+                              .replace("°", " deg ")
                               .replace("|", " ")
                               .replace("---", "")
                               .replace("___", "")
@@ -2058,8 +2081,8 @@ def create_eo_pdf_bytes(eo_text):
             pdf.ln(4) # Spasi antar baris kosong
             continue
             
-        # Batasan karakter per baris disesuaikan menjadi 82 agar teks melebar ke kanan
-        max_chars = 100
+        # Gunakan cell dengan batasan karakter aman agar tidak error horizontal space
+        max_chars = 85
         if len(sanitized_line) > max_chars:
             chunks = [sanitized_line[i:i+max_chars] for i in range(0, len(sanitized_line), max_chars)]
             for chunk in chunks:
