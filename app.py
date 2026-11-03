@@ -10,6 +10,7 @@ import os
 from datetime import datetime
 import pdfplumber  # Pastikan pdfplumber sudah terinstall (pip install pdfplumber)
 import tempfile
+
 # Import modul ReportLab untuk PDF
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
@@ -20,12 +21,8 @@ from fpdf import FPDF
 from fpdf.errors import FPDFException
 
 # ==========================================
-# 1. SET TOKEN OAUTH / BEARER (AQ...)
+# 1. SET TOKEN OAUTH / BEARER & GEMINI CONFIG
 # ==========================================
-# Mengambil token secara aman (bisa dari Streamlit Secrets Cloud atau Environment / Fallback Lokal)
-import os
-import streamlit as st
-
 api_key = os.environ.get("GEMINI_API_KEY", "GANTI_DENGAN_API_KEY_ANDA")
 genai.configure(api_key=api_key)
 
@@ -36,7 +33,7 @@ if "iterations" not in st.session_state:
     st.session_state["iterations"] = []
 
 if "ac_type" not in st.session_state:
-    st.session_state["ac_type"] = "B737-8"
+    st.session_state["ac_type"] = "DHC6-300"
 
 if "ac_reg" not in st.session_state:
     st.session_state["ac_reg"] = ""
@@ -48,7 +45,7 @@ if "kasus_baru" not in st.session_state:
     st.session_state["kasus_baru"] = ""
 
 # ---------------------------------------------------------
-# KONFIGURASI HALAMAN & CUSTOM CSS UNTUK MENAIKKAN LOGO
+# KONFIGURASI HALAMAN & CUSTOM CSS
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="AIRFAST Indonesia | Defect & Reliability Analyzer",
@@ -56,15 +53,12 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom CSS untuk menghilangkan padding atas pada sidebar agar logo naik ke paling atas
 st.markdown(
     """
     <style>
-        /* Mengurangi padding atas area sidebar secara keseluruhan */
         [data-testid="stSidebarContent"] {
             padding-top: 1rem !important;
         }
-        /* Menghilangkan margin atas pada blok pertama di sidebar */
         [data-testid="stSidebarUserContent"] {
             padding-top: 0rem !important;
         }
@@ -74,7 +68,7 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# SISTEM PENYIMPANAN DAN BACA LAPORAN LOKAL (DAN KEY)
+# SISTEM PENYIMPANAN DAN BACA LAPORAN LOKAL
 # ---------------------------------------------------------
 REPORT_STORAGE_FILE = "saved_reports.json"
 
@@ -109,13 +103,72 @@ def get_next_dan_key(ac_type, defect_text):
     return display_name, dan_id
 
 # ---------------------------------------------------------
+# MODUL RAG: PENCARIAN MANUAL PDF LOKAL
+# ---------------------------------------------------------
+@st.cache_data(show_spinner=False)
+def search_reference_library(fleet_type, query_text, max_pages_per_pdf=5):
+    folder_mapping = {
+        "DHC6-300": "DHC6-300",
+        "DHC6-400": "DHC6-400",
+        "B737-8": "B737-8",
+        "BELL-412": "Bell412",
+        "AS350B3": "AS350B3",
+        "MIL-171": "MIL171"
+    }
+    
+    folder_name = folder_mapping.get(fleet_type, fleet_type)
+    target_dir = os.path.join("reference_library", folder_name)
+    
+    retrieved_contexts = []
+    detected_ata = "N/A"
+    
+    if not os.path.exists(target_dir):
+        return f"Direktori referensi untuk armada {fleet_type} tidak ditemukan di {target_dir}.", detected_ata
+    
+    text_upper = query_text.upper()
+    raw_words = re.findall(r'\b[A-Za-z0-9]+\b', text_upper)
+    stop_words = {"THE", "TO", "OF", "AND", "A", "IN", "IS", "IT", "FOR", "ON", "WITH", "NOT", "FAIL", "VALVE"}
+    keywords = [w for w in raw_words if len(w) > 2 and w not in stop_words]
+    
+    ata_match = re.search(r'(?:ATA)?\s*(\d{2})[-]?(\d{2})?', text_upper)
+    if ata_match:
+        detected_ata = f"{ata_match.group(1)}-{ata_match.group(2) if ata_match.group(2) else '10'}"
+
+    try:
+        pdf_files = [f for f in os.listdir(target_dir) if f.lower().endswith('.pdf')]
+        
+        for file_name in pdf_files[:3]:
+            file_path = os.path.join(target_dir, file_name)
+            with pdfplumber.open(file_path) as pdf:
+                for page_idx, page in enumerate(pdf.pages[:max_pages_per_pdf]):
+                    page_text = page.extract_text()
+                    if not page_text:
+                        continue
+                        
+                    page_text_upper = page_text.upper()
+                    score = sum(1 for kw in keywords if kw in page_text_upper)
+                    if detected_ata != "N/A" and detected_ata[:2] in page_text_upper:
+                        score += 5
+                        
+                    if score > 0:
+                        snippet = page_text[:800].replace('\n', ' ')
+                        retrieved_contexts.append(f"[Sumber: {file_name} - Hal {page_idx+1}]\n{snippet}")
+                        
+    except Exception as e:
+        return f"Gagal membaca file referensi PDF: {str(e)}", detected_ata
+
+    if retrieved_contexts:
+        combined_context = "\n\n".join(retrieved_contexts[:3])
+        return combined_context, detected_ata
+    else:
+        return "Tidak ditemukan referensi spesifik di manual PDF lokal. Menggunakan standar analisis umum.", detected_ata
+
+# ---------------------------------------------------------
 # SIDEBAR - LOGO LOKAL & PENGATURAN API KEY
 # ---------------------------------------------------------
-# 1. TAMPILKAN LOGO AIRFAST DI PALING ATAS SIDEBAR
 if os.path.exists("logo.png"):
     st.sidebar.image("logo.png", use_container_width=True)
 
-# 2. PENGATURAN API KEY (DI BAWAH LOGO)
 st.sidebar.title("⚙️ Pengaturan API")
 api_key_input = st.sidebar.text_input(
     "Masukkan Gemini API Key:",
@@ -143,7 +196,6 @@ if saved_reports:
             st.session_state['current_dan_key'] = selected_saved_key
             st.session_state['history_match'] = pd.DataFrame(data['history_match'])
             
-            # Memuat array iterations secara utuh (dengan fallback jika data lama)
             if 'iterations' in data:
                 st.session_state['iterations'] = data['iterations']
             else:
@@ -174,19 +226,14 @@ st.sidebar.info(
 # FUNGSI PEMANGGILAN GEMINI API
 # ---------------------------------------------------------
 def call_gemini_api(prompt_text, user_api_key="", uploaded_file=None):
-    # 1. Prioritas utama: Ambil dari parameter yang dikirim ATAU dari session_state sidebar
     api_key = user_api_key.strip() if user_api_key else st.session_state.get('user_api_key', '').strip()
-    
     if not api_key:
         api_key = os.environ.get("GEMINI_API_KEY", "")
 
-    # 3. Jika benar-benar tidak ditemukan sama sekali
     if not api_key:
         raise ValueError("API Key tidak ditemukan. Silakan masukkan API Key di sidebar.")
 
     clean_api_key = str(api_key).strip().strip('"').strip("'")
-    
-    # Gunakan model aktif gemini-3.8-flash (atau gemini-2.0-flash)
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
     
     headers = {
@@ -194,10 +241,8 @@ def call_gemini_api(prompt_text, user_api_key="", uploaded_file=None):
         "x-goog-api-key": clean_api_key
     }
     
-    # Susun payload teks
     parts = [{"text": prompt_text}]
     
-    # Tambahkan file jika ada lampiran (Gambar / PDF)
     if uploaded_file is not None:
         file_bytes = uploaded_file.getvalue()
         base64_data = base64.b64encode(file_bytes).decode('utf-8')
@@ -211,11 +256,7 @@ def call_gemini_api(prompt_text, user_api_key="", uploaded_file=None):
         })
     
     payload = {
-        "contents": [
-            {
-                "parts": parts
-            }
-        ]
+        "contents": [{"parts": parts}]
     }
 
     response = requests.post(url, headers=headers, json=payload, timeout=90)
@@ -248,7 +289,7 @@ def load_defect_db_by_sheet(sheet_name):
         return pd.DataFrame()
 
 # ---------------------------------------------------------
-# 1. FUNGSI PEMBANTU: PARSER TABEL MARKDOWN KE REPORTLAB
+# FUNGSI PEMBANTU: PARSER TABEL MARKDOWN KE REPORTLAB
 # ---------------------------------------------------------
 def parse_markdown_table_to_reportlab(text_block, styles):
     lines = text_block.strip().split('\n')
@@ -298,7 +339,7 @@ def parse_markdown_table_to_reportlab(text_block, styles):
     return None
 
 # ---------------------------------------------------------
-# 2. FUNGSI UTAMA: GENERATE LAPORAN PDF (DENGAN BAGIAN 5)
+# FUNGSI UTAMA: GENERATE LAPORAN PDF
 # ---------------------------------------------------------
 def generate_pdf_report(ac_type, kasus_baru, selected_ata, iterations_list, df_history, lang="id"):
     buffer = io.BytesIO()
@@ -348,7 +389,6 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, iterations_list, df_h
         story.append(Paragraph(f"Generated on: {datetime.now().strftime('%d %B %Y, %H:%M WIB')} | System: AIRFAST Indonesia - Defect Analyzer", subtitle_style))
         story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#1E3A8A'), spaceAfter=8))
 
-        # 1. Informasi Defect
         story.append(Paragraph(labels["sec1"], h2_style))
         info_data = [
             [Paragraph(f"<b>{labels['ac_label']}</b>", body_style), Paragraph(html.escape(f"{ac_type}"), body_style)],
@@ -365,7 +405,6 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, iterations_list, df_h
         story.append(t_info)
         story.append(Spacer(1, 6))
 
-        # Loop iterasi analisis
         for idx, iter_data in enumerate(iterations_list):
             if idx > 0:
                 story.append(Paragraph(f"<b>--- ITERATION / FEEDBACK STEP {idx} ---</b>", h2_style))
@@ -410,14 +449,12 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, iterations_list, df_h
                 story.append(Paragraph(labels["sec3"], h2_style))
                 chunks = rca_content.split('\n\n')
                 for chunk in chunks:
-                    # Cek apakah ini diagram ASCII (mengandung pola struktur seperti +-- atau \--> atau ===)
                     is_ascii_diagram = ("+--" in chunk) or ("\\-->" in chunk) or ("===" in chunk) or ("---+" in chunk)
                     
                     if "```" in chunk or is_ascii_diagram:
                         clean_diagram = chunk.replace("```", "").strip()
                         story.append(Paragraph(html.escape(clean_diagram).replace('\n', '<br/>').replace(' ', '&nbsp;'), code_style))
                         story.append(Spacer(1, 4))
-                    # Pastikan benar-benar tabel Markdown (memiliki baris pemisah |---|) DAN bukan diagram ASCII
                     elif '|' in chunk and ('---' in chunk or '::' in chunk) and not is_ascii_diagram:
                         pdf_table = parse_markdown_table_to_reportlab(chunk, styles)
                         if pdf_table:
@@ -434,7 +471,6 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, iterations_list, df_h
                 story.append(Paragraph(html.escape(rec_content).replace('\n', '<br/>'), body_style))
                 story.append(Spacer(1, 6))
 
-        # 5. HISTORICAL RECORD SECTION (DITAMBAHKAN KEMBALI DI SINI)
         story.append(Spacer(1, 8))
         story.append(Paragraph(labels["sec5"], h2_style))
         
@@ -444,7 +480,6 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, iterations_list, df_h
             td_style_h = ParagraphStyle('TDataH', parent=styles['Normal'], fontName='Helvetica', fontSize=7, textColor=colors.darkslategray)
             td_center_h = ParagraphStyle('TDataCenterH', parent=styles['Normal'], fontName='Helvetica', fontSize=7, textColor=colors.darkslategray, alignment=1)
 
-            # Header Tabel Histori
             hist_data.append([
                 Paragraph("<b>Date</b>", th_style_h),
                 Paragraph("<b>AML No</b>", th_style_h),
@@ -465,7 +500,6 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, iterations_list, df_h
                     Paragraph(act_str, td_style_h)
                 ])
 
-            # Lebar kolom proporsional total 515 pt
             col_widths_h = [60, 75, 190, 190]
             t_hist = Table(hist_data, colWidths=col_widths_h, repeatRows=1)
             t_hist.setStyle(TableStyle([
@@ -494,7 +528,7 @@ def generate_pdf_report(ac_type, kasus_baru, selected_ata, iterations_list, df_h
         return fallback_buffer.getvalue()
 
 # ---------------------------------------------------------
-# MAPPING REGISTRASI FLEET & ATA CHAPTER 4-DIGIT
+# MAPPING REGISTRASI FLEET & ATA CHAPTER
 # ---------------------------------------------------------
 AIRCRAFT_REG_MAP = {
     "B737-8": ["PK-OFI", "PK-OFM"],
@@ -505,830 +539,13 @@ AIRCRAFT_REG_MAP = {
     "MIL-171": ["PK-OMI", "PK-OMS"]
 }
 
-# Daftar ATA Chapter 4-Digit Terstandar (Bisa ditambahkan/disesuaikan list-nya)
-ATA_4DIGIT_OPTIONS = [
-    "21-00 - AIR CONDITIONING",
-    "21-20 - DISTRIBUTION",
-    "21-21 - AIR DISTRIBUTION AND RECIRCULATION",
-    "21-23 - LAVATORY/GALLEY VENTILATION",
-    "21-24 - INDIVIDUAL AIR DISTRIBUTION",
-    "21-26 - AVIONICS EQUIPMENT VENTILATION",
-    "21-27 - AVIONICS EQUIPMENT GROUND COOLING",
-    "21-28 - CARGO COMPARTMENT VENTILATION",
-    "21-30 - PRESSURIZATION CONTROL",
-    "21-31 - PRESSURE CONTROL AND MONITORING",
-    "21-40 - HEATING",
-    "21-41 - COCKPIT AIR HEATING",
-    "21-43 - CARGO COMPARTMENT HEATING",
-    "21-50 - AIR COOLING",
-    "21-51 - FLOW CONTROL AND INDICATING",
-    "21-52 - AIR COOLING SYSTEM",
-    "21-53 - PACK COOLING AIR CONTROL",
-    "21-55 - EMERGENCY RAM AIR INLET",
-    "21-58 - CONDITIONED SERVICE AIR SYSTEM (CSAS)",
-    "21-60 - TEMPERATURE CONTROL",
-    "21-61 - PACK TEMPERATURE CONTROL",
-    "21-63 - COCKPIT AND CABIN TEMPERATURE CONTROL",
-    "22-00 - AUTO FLIGHT",
-    "22-10 - AUTOPILOT/FLIGHT DIRECTOR (AP/FD)",
-    "22-11 - AP/FD ENGAGEMENT",
-    "22-12 - CRUISE MODES",
-    "22-13 - COMMON MODES",
-    "22-30 - AUTOTHRUST",
-    "22-31 - AUTOTHRUST ENGAGEMENT",
-    "22-32 - AUTOTHRUST MODES",
-    "22-60 - FLIGHT AUGMENTATION COMPUTER (FAC)",
-    "22-61 - ARTIFICIAL FEEL AND RUDDER TRAVEL LIMITING",
-    "22-62 - RUDDER TRIM COMPUTATION",
-    "22-63 - YAW DAMPER COMPUTATION",
-    "22-64 - CONFIGURATION AND OPERATIONAL SPEED COMPUTATION",
-    "22-65 - ENGAGEMENT AND INTERNAL MONITORING",
-    "22-66 - FLIGHT AUGMENTATION COMPUTER (FAC)",
-    "22-67 - FAC: ELECTRICAL AND HYDRAULIC POWER SUPPLY",
-    "22-68 - FAC: DISCRETE/ANALOG INTERFACES",
-    "22-69 - FAC: ARINC BUS INTERFACES",
-    "22-70 - FLIGHT MANAGEMENT SYSTEM (FMS)",
-    "22-71 - FLIGHT PLAN/DATA BASE",
-    "22-72 - NAVIGATION/LATERAL FUNCTIONS",
-    "22-73 - PERFORMANCE/VERTICAL FUNCTIONS",
-    "22-74 - OPERATIONAL USE",
-    "22-75 - EIS DISPLAYS",
-    "22-76 - DATA LINK AND PRINTER FUNCTIONS",
-    "22-81 - FLIGHT CONTROL UNIT (FCU)",
-    "22-82 - MULTIPURPOSE CONTROL AND DISPLAY UNIT (MCDU)",
-    "22-83 - FLIGHT MANAGEMENT AND GUIDANCE COMPUTER (FMGC)",
-    "22-84 - FMGS: ELECTRICAL POWER SUPPLY",
-    "22-85 - FMGS: DISCRETE/ANALOG INTERFACES",
-    "22-86 - FMGS: BUS INTERFACES",
-    "22-91 - FAULT ISOLATION FUNCTION - PRINCIPLE",
-    "22-92 - AFS FAULT ISOLATION",
-    "22-96 - AFS TEST",
-    "22-97 - LAND CAT III CAPABILITY TEST",
-    "23-00 - COMMUNICATIONS",
-    "23-11 - HF SYSTEM",
-    "23-12 - VHF SYSTEM",
-    "23-13 - RADIO MANAGEMENT",
-    "23-28 - SATELLITE COMMUNICATION",
-    "23-30 - PASSENGER ADDRESS AND ENTERTAINMENT",
-    "23-31 - PASSENGER ADDRESS SYSTEM",
-    "23-32 - ANNOUNCEMENT - MUSIC TAPE REPRODUCER SYSTEM",
-    "23-33 - PASSENGER ENTERTAINMENT",
-    "23-36 - PASSENGER ENTERTAINMENT",
-    "23-42 - COCKPIT TO GROUND CREW CALL SYSTEM",
-    "23-43 - FLIGHT CREW INTERPHONE",
-    "23-44 - CABIN AND SERVICE INTERPHONE",
-    "23-51 - AUDIO MANAGEMENT SYSTEM (AMS) ",
-    "23-52 - RADIO AND AUDIO MANAGEMENT PANELS (RMP) ",
-    "23-60 - STATIC DISCHARGING",
-    "23-61 - STATIC DISCHARGER",
-    "23-71 - COCKPIT VOICE RECORDER",
-    "23-72 - ANTI HIJACK CAMERA MONITORING",
-    "23-73 - CABIN INTERCOMMUNICATION DATA SYSTEM (CIDS) ",
-    "24-00 - ELECTRICAL POWER",
-    "24-20 - AC GENERATION",
-    "24-21 - INTEGRATED DRIVE GENERATOR SYSTEM (IDG, GCU) ",
-    "24-22 - AC MAIN GENERATION",
-    "24-23 - AC AUXILIARY GENERATION",
-    "24-24 - AC EMERGENCY GENERATION",
-    "24-25 - AC ESSENTIAL GENERATION SWITCHING",
-    "24-26 - GALLEY SUPPLY CONTROL",
-    "24-27 - AC GENERATION MONITORING AND INDICATING",
-    "24-28 - STATIC INVERTER",
-    "24-30 - DC GENERATION",
-    "24-32 - DC MAIN GENERATION",
-    "24-34 - DC EMERGENCY GENERATION",
-    "24-35 - DC ESSENTIAL & NORMAL GENERATION SWITCHING",
-    "24-37 - DC GENERATION MONITORING AND INDICATING",
-    "24-38 - DC GENERATION - BATTERIES",
-    "24-40 - EXTERNAL POWER",
-    "24-41 - AC EXTERNAL POWER CONTROL",
-    "24-42 - AC GROUND SERVICE BUS CONTROL",
-    "24-43 - DC GROUND SERVICE BUS CONTROL",
-    "24-50 - AC ELECTRICAL LOAD DISTRIBUTION",
-    "24-51 - AC MAIN DISTRIBUTION",
-    "24-52 - AC ESSENTIAL DISTRIBUTION",
-    "24-56 - GALLEY SUPPLY",
-    "24-60 - DC ELECTRICAL LOAD DISTRIBUTION",
-    "24-61 - DC MAIN DISTRIBUTION",
-    "24-62 - DC ESSENTIAL DISTRIBUTION",
-    "24-67 - REFUELING ON BATTERY",
-    "24-92 - ELECTRICAL ROUTING",
-    "25-00 - EQUIPMENT/FURNISHINGS",
-    "25-10 - COCKPIT",
-    "25-11 - COCKPIT SEATS",
-    "25-13 - LINING AND FURNISHINGS",
-    "25-14 - COCKPIT EQUIPMENT RACKS",
-    "25-15 - FLIGHT CREW FOOT WARMERS",
-    "25-18 - COCKPIT ADDITIONAL ELECTRICAL SUPPLY",
-    "25-20 - PASSENGER COMPARTMENT",
-    "25-21 - PASSENGER COMPARTMENT SEATS",
-    "25-22 - CABIN ATTENDANT SEATS",
-    "25-23 - LININGS AND FURNISHINGS",
-    "25-24 - OVERHEAD STOWAGE COMPARTMENTS",
-    "25-25 - PASSENGER SERVICE INFORMATION UNITS (PSIU) ",
-    "25-26 - CURTAINS AND PARTITIONS",
-    "25-27 - ANCILLARY EQUIPMENT",
-    "25-28 - FLOOR COVERING",
-    "25-29 - ELECTRICAL SERVICE SUPPLY",
-    "25-30 - BUFFET AND GALLEY",
-    "25-31 - FORWARD GALLEY",
-    "25-33 - AFT GALLEY",
-    "25-34 - GALLEY COOLING",
-    "25-35 - GALLEY EQUIPMENT",
-    "25-40 - LAVATORIES",
-    "25-41 - FORWARD LAVATORIES",
-    "25-43 - AFT LAVATORIES",
-    "25-44 - RAZOR SUPPLY",
-    "25-45 - LAVATORY EQUIPMENT",
-    "25-50 - CARGO COMPARTMENTS",
-    "25-52 - SEMI AUTOMATIC CARGO LOADING",
-    "25-54 - LININGS AND FURNISHINGS/FORWARD CARGO COMPARTMENT",
-    "25-55 - LININGS AND FURNISHINGS/AFT CARGO COMPARTMENT",
-    "25-60 - EMERGENCY",
-    "25-61 - ESCAPE FACILITIES - COCKPIT",
-    "25-62 - ESCAPE FACILITIES - CABIN",
-    "25-63 - EVACUATION SIGNALING EQUIPMENT",
-    "25-64 - FIRST AID EQUIPMENT",
-    "25-65 - MISCELLANEOUS EMERGENCY EQUIPMENT",
-    "25-66 - FLOATATION AND SURVIVAL EQUIPMENT",
-    "25-68 - RAPID DECOMPRESSION SAFETY SYSTEM",
-    "25-70 - ACCESSORY COMPARTMENTS",
-    "25-71 - AVIONICS COMPARTMENT",
-    "25-80 - INSULATION (THERMAL AND ACOUSTICAL) ",
-    "26-00 - FIRE PROTECTION",
-    "26-10 - DETECTION",
-    "26-12 - ENGINE FIRE AND OVERHEAT DETECTION",
-    "26-13 - APU FIRE AND OVERHEAT DETECTION",
-    "26-15 - AVIONICS COMPARTMENT SMOKE DETECTION",
-    "26-16 - CARGO COMPARTMENT SMOKE DETECTION",
-    "26-17 - LAVATORY SMOKE DETECTION",
-    "26-20 - EXTINGUISHING",
-    "26-21 - ENGINE FIRE EXTINGUISHING",
-    "26-22 - APU FIRE EXTINGUISHING",
-    "26-23 - CARGO COMPARTMENT FIRE EXTINGUISHING",
-    "26-24 - PORTABLE FIRE EXTINGUISHER",
-    "26-25 - LAVATORY FIRE EXTINGUISHING",
-    "27-00 - FLIGHT CONTROLS",
-    "27-10 - AILERON",
-    "27-14 - AILERON AND HYDRAULIC ACTUATION",
-    "27-20 - RUDDER",
-    "27-21 - RUDDER CONTROL",
-    "27-22 - RUDDER TRIM ACTUATION",
-    "27-23 - ARTIFICIAL FEEL AND RUDDER TRAVEL LIMITING - ACTUATION",
-    "27-24 - RUDDER HYDRAULIC ACTUATION",
-    "27-25 - RUDDER POSITION INDICATING",
-    "27-26 - YAW DAMPER ACTUATION",
-    "27-30 - ELEVATOR",
-    "27-34 - ELEVATOR AND HYDRAULIC ACTUATION",
-    "27-40 - TRIMMABLE HORIZONTAL STABILIZER (THS) ",
-    "27-41 - THS MECHANICAL CONTROL",
-    "27-44 - THS HYDRAULIC ACTUATION",
-    "27-45 - THS POSITION INDICATING",
-    "27-50 - FLAPS",
-    "27-51 - FLAPS ELECTRICAL CONTROL AND MONITORING",
-    "27-54 - FLAPS HYDRAULIC ACTUATION AND POWER TRANSMISSION",
-    "27-55 - FLAPS POSITION INDICATING",
-    "27-60 - SPOILER",
-    "27-64 - SPOILER HYDRAULIC ACTUATION",
-    "27-80 - LIFT AUGMENTING",
-    "27-81 - SLATS ELECTRICAL CONTROL AND MONITORING",
-    "27-84 - SLATS HYDRAULIC ACTUATION AND POWER TRANSMISSION",
-    "27-85 - SLATS POSITION INDICATING",
-    "27-90 - ELECTRICAL FLIGHT CONTROL SYSTEM (EFCS) ",
-    "27-92 - CONTROL INPUTS INTERFACE AND POWER SUPPLY",
-    "27-93 - ELEVATOR AILERON CONTROL SYSTEM",
-    "27-94 - SPOILER ELEVATOR CONTROL SYSTEM",
-    "27-95 - FLIGHT CONTROL DATA CONCENTRATOR (FCDC) ",
-    "27-96 - MAINTENANCE AND SAFETY TESTS/BITE",
-    "28-00 - FUEL",
-    "28-10 - STORAGE",
-    "28-11 - TANKS",
-    "28-12 - TANK VENTING SYSTEM",
-    "28-13 - WING CENTER TANK EXTERNAL VENTILATING SYSTEM",
-    "28-15 - INTERCELL TRANSFER",
-    "28-16 - FUEL RECIRCULATION - COOLING",
-    "28-18 - TANK IGNITION PREVENTION SYSTEM",
-    "28-20 - DISTRIBUTION",
-    "28-21 - MAIN FUEL PUMP SYSTEM",
-    "28-22 - APU FUEL PUMP SYSTEM",
-    "28-23 - CROSSFEED SYSTEM",
-    "28-24 - ENGINE LP FUEL SHUT OFF",
-    "28-25 - REFUEL/DEFUEL SYSTEM",
-    "28-26 - MAIN TRANSFER SYSTEM",
-    "28-28 - ADDITIONAL CENTER TANK TRANSFER SYSTEM",
-    "28-29 - APU LP FUEL SHUT OFF",
-    "28-40 - INDICATING",
-    "28-42 - QUANTITY INDICATING",
-    "28-43 - MANUAL (MAGNETIC) INDICATORS",
-    "28-46 - TANK LEVEL SENSING",
-    "28-51 - AUXILIARY FUEL MANAGEMENT COMPUTER (AFMC) - OPERATIONAL USE",
-    "29-00 - HYDRAULIC POWER",
-    "29-10 - MAIN HYDRAULIC POWER",
-    "29-11 - GREEN MAIN HYDRAULIC POWER",
-    "29-12 - BLUE MAIN HYDRAULIC POWER",
-    "29-13 - YELLOW MAIN HYDRAULIC POWER",
-    "29-14 - HYDRAULIC RESERVOIR PRESSURIZING SYSTEM",
-    "29-16 - HYDRAULIC RESERVOIR FILLING",
-    "29-17 - SEAL DRAIN SYSTEM",
-    "29-19 - GROUND INTERNAL LEAK TEST SYSTEM",
-    "29-20 - AUXILIARY HYDRAULIC POWER",
-    "29-22 - BLUE AUXILIARY HYDRAULIC POWER",
-    "29-23 - POWER TRANSFER",
-    "29-24 - YELLOW AUXILIARY HYDRAULIC POWER",
-    "29-30 - INDICATING",
-    "29-31 - HYDRAULIC FLUID QUANTITY INDICATING",
-    "29-32 - HYDRAULIC FLUID PRESSURE INDICATING",
-    "29-33 - HYDRAULIC FLUID TEMPERATURE INDICATING",
-    "29-34 - RESERVOIR PRESSURIZATION INDICATING",
-    "30-00 - ICE AND RAIN PROTECTION",
-    "30-10 - AIRFOIL",
-    "30-11 - WING ICE PROTECTION",
-    "30-21 - ENGINE AIR INTAKE ICE PROTECTION",
-    "30-31 - PROBE ICE PROTECTION",
-    "30-42 - WINDSHIELD ANTI-ICING AND DEFOGGING",
-    "30-45 - WINDSHIELD RAIN PROTECTION",
-    "30-71 - DRAIN MAST ICE PROTECTION",
-    "30-72 - WATER SERVICING PANELS HEATING",
-    "30-73 - POTABLE WATER ICE PROTECTION",
-    "30-80 - DETECTION",
-    "30-81 - ICE DETECTION",
-    "31-00 - INDICATING/RECORDING SYSTEMS",
-    "31-10 - INSTRUMENTS AND CONTROL PANELS",
-    "31-14 - OVERHEAD PANEL",
-    "31-17 - MISCELLANEOUS CABIN/CARGO PANELS",
-    "31-21 - ELECTRICAL CLOCK",
-    "31-30 - CENTRALIZED FAULT DISPLAY SYSTEM (CFDS) AND DATA RECORDING SYSTEM",
-    "31-32 - CENTRALIZED FAULT DISPLAY INTERFACE UNIT (CFDIU)",
-    "31-33 - DIGITAL FLIGHT DATA RECORDING SYSTEM (DFDRS) - INTERCONNECTION",
-    "31-35 - MULTIFUNCTION PRINTING",
-    "31-36 - AIRCRAFT CONDITION MONITORING INTERCONNECTION",
-    "31-37 - AIRCRAFT CONDITION MONITORING INPUT INTERFACE",
-    "31-38 - UP AND DOWN DATA LOADING SYSTEM ACQUISITION/INTERFACE AND EQUIPMENT",
-    "31-39 - COMBINED VOICE AND DATA RECORDING / RECORDING AND AIRCRAFT LOCATING SYSTEM",
-    "31-50 - CENTRAL WARNING SYSTEMS",
-    "31-51 - OPERATIONAL PRESENTATION",
-    "31-52 - FWC - ACQUISITION/INTERFACE",
-    "31-53 - FLIGHT WARNING COMPUTER (FWC)",
-    "31-54 - SDAC - ACQUISITION/INTERFACE",
-    "31-55 - SYSTEM DATA ACQUISITION CONCENTRATOR (SDAC)",
-    "31-56 - ECAM CONTROL PANEL",
-    "31-60 - CENTRAL WARNING SYSTEMS",
-    "31-61 - EIS - CONTROL",
-    "31-62 - DMC - ACQUISITION/INTERFACE",
-    "31-63 - DISPLAY MANAGEMENT COMPUTER (DMC)",
-    "31-64 - PRIMARY FLIGHT DISPLAY (PFD)",
-    "31-65 - NAVIGATION DISPLAY (ND)",
-    "31-66 - ECAM ENGINE/WARNING DISPLAY",
-    "31-67 - ECAM SYSTEM/STATUS DISPLAY",
-    "31-68 - EIS - SWITCHING",
-    "31-69 - EIS - TEST/BITE",
-    "32-00 - LANDING GEAR",
-    "32-10 - MAIN GEAR AND DOORS",
-    "32-11 - MAIN GEAR",
-    "32-12 - MAIN GEAR DOORS",
-    "32-20 - NOSE GEAR AND DOORS",
-    "32-21 - NOSE GEAR",
-    "32-22 - NOSE GEAR DOORS",
-    "32-30 - EXTENSION AND RETRACTION",
-    "32-31 - NORMAL EXTENSION AND RETRACTION",
-    "32-33 - FREE FALL EXTENSION",
-    "32-40 - WHEELS AND BRAKES",
-    "32-41 - WHEELS",
-    "32-42 - NORMAL BRAKING",
-    "32-43 - ALTERNATE BRAKING WITH ANTI SKID",
-    "32-44 - ALTERNATE BRAKING WITHOUT ANTI SKID",
-    "32-45 - PARKING/ULTIMATE EMERGENCY BRAKING",
-    "32-46 - BRAKES AND STEERING - BITE",
-    "32-47 - BRAKE SYSTEM TEMPERATURE",
-    "32-48 - BRAKE COOLING",
-    "32-49 - TIRE PRESSURE INDICATING SYSTEM (TPIS)",
-    "32-51 - STEERING",
-    "32-60 - POSITION AND WARNING",
-    "32-61 - INDICATING AND WARNING",
-    "32-62 - LANDING GEAR - POSITION INFORMATION",
-    "32-69 - LANDING GEAR - BITE",
-    "33-00 - LIGHTS",
-    "33-10 - COCKPIT",
-    "33-12 - GENERAL ILLUMINATION",
-    "33-13 - INSTRUMENT AND PANEL INTEGRAL LIGHTING",
-    "33-14 - ANNUNCIATOR LIGHT TEST AND DIMMING",
-    "33-20 - CABIN",
-    "33-21 - GENERAL ILLUMINATION",
-    "33-23 - CALL SYSTEM",
-    "33-24 - LAVATORY LIGHTING",
-    "33-25 - PASSENGER READING LIGHTS",
-    "33-26 - LAVATORY LIGHTED SIGNS",
-    "33-27 - LIGHT - WORK, CABIN ATTENDANT",
-    "33-30 - CARGO AND SERVICE COMPARTMENTS",
-    "33-31 - SERVICE AREA LIGHTING",
-    "33-32 - AIR CONDITIONING DUCT AND ACCESSORY COMPARTMENT LIGHTING",
-    "33-34 - FWD - AFT CARGO COMPARTMENT LIGHTING",
-    "33-35 - AVIONICS COMPARTMENT LIGHTING",
-    "33-37 - WHEEL WELL LIGHTING",
-    "33-40 - EXTERIOR",
-    "33-41 - NAVIGATION LIGHTS",
-    "33-42 - LANDING LIGHTS",
-    "33-43 - RUNWAY TURNOFF LIGHTS",
-    "33-46 - TAXI AND TAKE OFF LIGHTS",
-    "33-47 - LOGO LIGHTS",
-    "33-48 - ANTI-COLLISION/STROBE LIGHTING",
-    "33-49 - WING AND ENGINE SCAN LIGHTING",
-    "33-50 - EMERGENCY LIGHTING",
-    "33-51 - CABIN EMERGENCY LIGHTING",
-    "34-00 - NAVIGATION",
-    "34-10 - AIR DATA/INERTIAL REFERENCE (ADIRS)",
-    "34-11 - SENSORS, POWER SUPPLY AND SWITCHING",
-    "34-12 - AIR DATA/INERTIAL REFERENCE SYSTEM",
-    "34-13 - AIR DATA",
-    "34-14 - ATTITUDE, HEADING AND POSITION",
-    "34-18 - ADIRS - BITE",
-    "34-20 - STANDBY NAVIGATION SYSTEMS",
-    "34-21 - STANDBY DATA : ALTITUDE AND AIRSPEED",
-    "34-22 - STANDBY DATA : ATTITUDE AND HEADING",
-    "34-36 - ILS",
-    "34-41 - WEATHER RADAR SYSTEM",
-    "34-42 - RADIO ALTIMETER",
-    "34-43 - TRAFFIC AND TERRAIN COLLISION AVOIDANCE SYSTEM",
-    "34-48 - GROUND PROXIMITY WARNING SYSTEM (GPWS)",
-    "34-51 - DME",
-    "34-52 - ATC/MODE S (SELECT) ",
-    "34-53 - ADF",
-    "34-55 - VOR/MARKER",
-    "34-57 - RADIO MAGNETIC INFORMATION - SWITCHING AND INDICATING",
-    "34-58 - SATELLITE NAVIGATION",
-    "34-72 - TRAFFIC AND TERRAIN INTEGRATED SURVEILLANCE SYSTEM (T/TISS) ",
-    "35-00 - OXYGEN",
-    "35-10 - CREW OXYGEN",
-    "35-11 - OXYGEN STORAGE",
-    "35-12 - OXYGEN DISTRIBUTION",
-    "35-13 - CONTROL AND INDICATING",
-    "35-20 - PASSENGER OXYGEN",
-    "35-21 - OXYGEN STORAGE",
-    "35-22 - OXYGEN DISTRIBUTION",
-    "35-23 - CONTROL AND INDICATING",
-    "35-30 - PORTABLE OXYGEN",
-    "35-31 - FLIGHT CREW PORTABLE DEVICES",
-    "35-32 - CABIN ATTENDANTS PORTABLE DEVICES",
-    "36-00 - PNEUMATIC",
-    "36-10 - DISTRIBUTION",
-    "36-11 - ENGINE BLEED AIR SUPPLY SYSTEM",
-    "36-12 - APU BLEED AIR SUPPLY AND CROSSBLEED SYSTEMS",
-    "36-13 - GROUND COMPRESSED AIR SUPPLY SYSTEM",
-    "36-14 - ENVIRONMENT PROTECTION",
-    "36-20 - INDICATING",
-    "36-21 - PRESSURE AND TEMPERATURE MONITORING",
-    "36-22 - LEAK DETECTION",
-    "38-00 - WATER/WASTE",
-    "38-10 - POTABLE",
-    "38-11 - WATER STORAGE",
-    "38-12 - DISTRIBUTION",
-    "38-13 - QUANTITY INDICATING",
-    "38-14 - WATER DRAINING (DUMP) ",
-    "38-30 - WASTE DISPOSAL",
-    "38-31 - TOILET SYSTEM",
-    "38-32 - WASTE WATER DRAIN",
-    "38-40 - AIR SUPPLY",
-    "38-41 - AIR SUPPLY SYSTEM",
-    "38-42 - AIR SUPPLY BOOST SYSTEM",
-    "44-33 - BROADBAND COMMUNICATION SYSTEM",
-    "44-34 - ON-BOARD MOBILE TELEPHONY SYSTEM",
-    "46-00 - INFORMATION SYSTEMS",
-    "46-20 - FLIGHT DECK INFORMATION SYSTEMS",
-    "46-21 - AIR TRAFFIC AND INFORMATION MANAGEMENT SYSTEM (ATIMS) - COMPONENTS AND INTERFACES",
-    "46-22 - ATIMS - AIR TRAFFIC SERVICES (ATS) ",
-    "46-23 - ATIMS - AIRLINE INFORMATION SERVICES",
-    "46-24 - ATIMS - ROUTER",
-    "46-26 - FLIGHT OPERATION PERIPHERALS",
-    "47-00 - INERT GAS SYSTEM",
-    "47-10 - GENERATION/STORAGE",
-    "47-11 - INERT GAS GENERATION SYSTEM (IGGS) ",
-    "47-20 - DISTRIBUTION",
-    "47-21 - DISTRIBUTION CONTROL",
-    "47-31 - SUPPLY CONTROL",
-    "47-41 - SUPPLY INDICATING",
-    "49-00 - AIRBORNE AUXILIARY POWER",
-    "49-10 - POWER PLANT",
-    "49-11 - POWER PLANT",
-    "49-12 - APU MOUNTS",
-    "49-13 - FIRE SEALS",
-    "49-15 - ELECTRICAL HARNESS",
-    "49-16 - AIR INTAKE SYSTEM",
-    "49-17 - POWER PLANT DRAIN SYSTEM",
-    "49-20 - ENGINE",
-    "49-21 - POWER SECTION",
-    "49-23 - LOAD COMPRESSOR",
-    "49-26 - ACCESSORY DRIVE GEARBOX",
-    "49-30 - ENGINE FUEL AND CONTROL",
-    "49-31 - FUEL DISTRIBUTION",
-    "49-32 - APU FUEL CONTROL",
-    "49-40 - IGNITION AND STARTING",
-    "49-41 - IGNITION",
-    "49-42 - STARTING",
-    "49-50 - AIR",
-    "49-51 - BLEED AND SURGE AIR",
-    "49-52 - ACCESSORY COOLING",
-    "49-60 - ENGINE CONTROLS",
-    "49-61 - CONTROL AND MONITORING",
-    "49-62 - EMERGENCY SHUTDOWN",
-    "49-70 - INDICATING",
-    "49-71 - POWER INDICATING",
-    "49-72 - TEMPERATURE INDICATING",
-    "49-73 - ANALYZERS",
-    "49-80 - EXHAUST",
-    "49-81 - EXHAUST SYSTEM",
-    "49-90 - OIL",
-    "49-91 - STORAGE AND DISTRIBUTION",
-    "49-93 - OIL INDICATING",
-    "49-94 - LOW OIL PRESSURE AND HIGH OIL TEMPERATURE WARNING",
-    "49-96 - APU - OIL HEATING",
-    "51-00 - STANDARD PRACTICES AND STRUCTURES",
-    "51-21 - PROTECTIVE TREATMENT",
-    "51-22 - CORROSION PREVENTION",
-    "51-23 - COATINGS APPLICATION - GENERAL",
-    "51-24 - SEALING - GENERAL",
-    "51-70 - REPAIRS",
-    "51-73 - REPAIRS OF MINOR DAMAGE",
-    "51-74 - REPAIRS OF CORRODED AREAS",
-    "51-75 - PAINT REPAIRS",
-    "51-76 - SEALING REPAIRS",
-    "51-77 - STANDARD COMPOSITE REPAIRS",
-    "51-78 - CLEANING PROCESSES",
-    "52-00 - DOORS",
-    "52-10 - PASSENGER/CREW",
-    "52-11 - FWD PASSENGER/CREW DOOR",
-    "52-13 - AFT PASSENGER/CREW DOOR",
-    "52-20 - EMERGENCY EXIT",
-    "52-21 - PASSENGER COMPARTMENT EMERGENCY EXIT",
-    "52-22 - PASSENGER COMPARTMENT EMERGENCY EXIT",
-    "52-30 - CARGO",
-    "52-31 - FORWARD CARGO COMPARTMENT DOOR",
-    "52-32 - AFT CARGO COMPARTMENT DOOR",
-    "52-33 - BULK CARGO COMPARTMENT DOOR",
-    "52-35 - CARGO COMPARTMENT DOOR ELECTRICAL CONTROL SYSTEM",
-    "52-36 - CARGO COMPARTMENT DOOR HYDRAULIC SYSTEM",
-    "52-40 - SERVICE",
-    "52-41 - ACCESS DOORS",
-    "52-42 - SERVICE DOORS",
-    "52-50 - FIXED INTERIOR",
-    "52-51 - PASSENGER COMPARTMENT FIXED INTERIOR DOORS",
-    "52-70 - DOOR WARNING",
-    "52-71 - DOOR MONITORING AND FLIGHT LOCK FUNCTION",
-    "52-73 - EMERGENCY ESCAPE SLIDE RELEASE AND OVERPRESSURE WARNING SYSTEMS",
-    "52-80 - LANDING GEAR",
-    "52-81 - MAIN GEAR DOORS",
-    "52-82 - NOSE GEAR DOORS",
-    "52-90 - MISCELLANEOUS DOORS",
-    "52-91 - DOORS - RAM AIR TURBINE",
-    "52-92 - DOOR - OVERPRESSURE RELEASE, APU COMPARTMENT",
-    "53-00 - FUSELAGE",
-    "53-10 - NOSE FORWARD FUSELAGE",
-    "53-11 - MAIN STRUCTURE",
-    "53-12 - FLOOR PANELS",
-    "53-15 - FAIRINGS",
-    "53-16 - FITTINGS",
-    "53-19 - MISCELLANEOUS",
-    "53-20 - FORWARD FUSELAGE",
-    "53-21 - MAIN STRUCTURE",
-    "53-22 - FLOOR PANELS",
-    "53-23 - SUPPORT STRUTS",
-    "53-25 - FAIRINGS",
-    "53-29 - MISCELLANEOUS",
-    "53-30 - CENTER FUSELAGE",
-    "53-31 - MAIN STRUCTURE",
-    "53-32 - FLOOR PANELS",
-    "53-33 - SUPPORT STRUTS",
-    "53-35 - FAIRINGS",
-    "53-36 - FITTINGS",
-    "53-39 - MISCELLANEOUS",
-    "53-40 - REAR FUSELAGE",
-    "53-41 - MAIN STRUCTURE",
-    "53-42 - FLOOR PANELS",
-    "53-43 - SUPPORT STRUTS",
-    "53-45 - FAIRINGS",
-    "53-46 - FITTINGS",
-    "53-49 - MISCELLANEOUS",
-    "53-50 - CONE/REAR FUSELAGE",
-    "53-51 - MAIN STRUCTURE",
-    "53-53 - SUPPORT STRUTS",
-    "53-55 - FAIRINGS",
-    "53-56 - FITTINGS",
-    "53-58 - TAIL CONE",
-    "53-59 - MISCELLANEOUS",
-    "54-00 - NACELLES/PYLONS",
-    "54-10 - NACELLE SECTION",
-    "54-50 - PYLONS",
-    "54-51 - PYLON BOX",
-    "54-52 - FORWARD FAIRING",
-    "54-53 - PYLON-TO-WING CENTER FILLETS",
-    "54-54 - AFT FIXED FAIRING",
-    "54-55 - AFT MOVABLE FAIRING",
-    "54-56 - LOWER FAIRING",
-    "54-57 - PYLON-TO-NACELLE JUNCTION",
-    "55-00 - STABILIZERS",
-    "55-10 - HORIZONTAL STABILIZER",
-    "55-11 - TRIMMABLE HORIZONTAL STABILIZER SPAR BOX",
-    "55-12 - TRIMMABLE HORIZONTAL STABILIZER LEADING EDGE",
-    "55-13 - TRIMMABLE HORIZONTAL STABILIZER TRAILING EDGE",
-    "55-14 - TRIMMABLE HORIZONTAL STABILIZER TIPS",
-    "55-15 - TRIMMABLE HORIZONTAL STABILIZER APRON",
-    "55-16 - TRIMMABLE HORIZONTAL STABILIZER ATTACH FITTINGS",
-    "55-20 - ELEVATORS",
-    "55-21 - ELEVATOR SPAR BOX",
-    "55-22 - ELEVATOR LEADING EDGE",
-    "55-24 - ELEVATOR TIPS AND INBOARD END CAPS",
-    "55-26 - ELEVATOR ATTACH FITTINGS",
-    "55-30 - VERTICAL STABILIZER",
-    "55-31 - VERTICAL STABILIZER SPAR BOX",
-    "55-32 - VERTICAL STABILIZER LEADING EDGE",
-    "55-33 - VERTICAL STABILIZER TRAILING EDGE",
-    "55-34 - VERTICAL STABILIZER TIP",
-    "55-36 - VERTICAL STABILIZER ATTACH FITTINGS",
-    "55-40 - RUDDER",
-    "55-41 - RUDDER MAIN STRUCTURE",
-    "55-42 - RUDDER LEADING EDGE",
-    "55-43 - RUDDER FILLET FAIRING",
-    "55-44 - RUDDER TIP",
-    "55-46 - RUDDER ATTACH FITTINGS",
-    "56-00 - WINDOWS",
-    "56-10 - COCKPIT",
-    "56-11 - FIXED WINDOWS",
-    "56-12 - SLIDING WINDOWS",
-    "56-21 - CABIN WINDOWS",
-    "56-22 - CABIN DUMMY WINDOW",
-    "56-31 - PASSENGER/CREW DOOR WINDOWS",
-    "57-00 - WINGS",
-    "57-10 - CENTER WING",
-    "57-17 - ACCESS COVERS",
-    "57-20 - OUTER WING",
-    "57-21 - MAIN STRUCTURE",
-    "57-24 - FIXED PARTITION",
-    "57-26 - FITTINGS",
-    "57-27 - ACCESS COVERS",
-    "57-29 - MISCELLANEOUS",
-    "57-30 - WING TIP",
-    "57-31 - MAIN STRUCTURE",
-    "57-37 - ACCESS DOORS",
-    "57-39 - MISCELLANEOUS",
-    "57-40 - LEADING EDGE AND LEADING EDGE DEVICES",
-    "57-41 - LEADING EDGE",
-    "57-42 - SLAT 1",
-    "57-43 - SLAT 2",
-    "57-44 - SLAT 3",
-    "57-45 - SLAT 4",
-    "57-46 - SLAT 5",
-    "57-50 - TRAILING EDGE AND TRAILING EDGE DEVICES",
-    "57-51 - TRAILING EDGE",
-    "57-52 - INBOARD FLAP",
-    "57-53 - OUTBOARD FLAP",
-    "57-55 - FAIRINGS",
-    "57-59 - MISCELLANEOUS",
-    "57-60 - AILERONS",
-    "57-61 - AILERONS - MAIN STRUCTURE",
-    "57-70 - SPOILERS",
-    "57-71 - SPOILER 1",
-    "57-72 - SPOILER 2",
-    "57-73 - SPOILER 3",
-    "57-74 - SPOILER 4",
-    "57-75 - SPOILER 5",
-    "70-00 -  STANDARD PRACTICES - ENGINE",
-    "70-10 - SAFETY PRACTICES",
-    "70-24 - PRECAUTIONARY MEASURES",
-    "70-25 - NON-DESTRUCTIVE TESTING",
-    "70-26 - INSPECTION/CHECK",
-    "70-27 - CLEANING",
-    "70-28 - REPAIR",
-    "70-30 - LIST OF MATERIALS",
-    "70-40 - IDENTIFICATION",
-    "70-50 - MISCELLANEOUS",
-    "70-60 - STANDARD PRACTICES - NACELLE/ENGINE BUILD-UP UNIT (EBU)",
-    "70-70 - WIRING",
-    "70-71 - POWER PLANT WIRING STANDARD PRACTICES - ATA INDEX",
-    "70-80 - PRESERVATION",
-    "70-00 - STANDARD PRACTICES - ENGINE - GENERAL",
-    "70-11 - PRECAUTIONARY MEASURES TO BE TAKEN DURING REMOVAL/INSTALLATION",
-    "70-21 - SEALS",
-    "70-22 - LOCKING",
-    "70-23 - TIGHTENING TORQUES",
-    "70-25 - NON-DESTRUCTIVE TESTING",
-    "70-27 - CLEANING",
-    "70-28 - REPAIR",
-    "70-30 - LIST OF MATERIALS",
-    "70-51 - FLUORESCENT PENETRANT INSPECTION - PORTABLE - WATER WASHABLE",
-    "70-52 - EDDY CURRENT INSPECTION OF FAN BLADE LEADING EDGE",
-    "70-60 - STANDARD PRACTICES - NACELLE/ENGINE BUILD-UP UNIT (EBU)",
-    "70-71 - POWER PLANT WIRING STANDARD PRACTICES - ATA INDEX",
-    "71-00 - POWER PLANT - GENERAL",
-    "71-13 - FAN COWL",
-    "71-21 - FORWARD MOUNT",
-    "71-22 - AFT MOUNT",
-    "71-40 - ATTACH FITTINGS",
-    "71-51 - ELECTRICAL HARNESS - GENERAL WIRING - FAN ZONE AND EQUIPMENT LIST",
-    "71-52 - ELECTRICAL HARNESS - GENERAL WIRING - CORE ZONE AND EQUIPMENT LIST",
-    "71-60 - AIR INTAKE",
-    "71-61 - AIR INTAKE COWL",
-    "71-70 - ENGINE DRAINS",
-    "71-71 - DRAIN SYSTEM",
-    "71-00 - POWER PLANT - GENERAL",
-    "71-10 - COWLING",
-    "71-11 - AIR INTAKE COWL",
-    "71-13 - FAN COWL",
-    "71-20 - MOUNTS",
-    "71-21 - FORWARD MOUNT",
-    "71-22 - AFT MOUNT",
-    "71-40 - ATTACH FITTINGS",
-    "71-50 - ELECTRICAL HARNESS",
-    "71-51 - ELECTRICAL HARNESS - GENERAL WIRING - FAN ZONE AND EQUIPMENT LIST",
-    "71-52 - ELECTRICAL HARNESS - GENERAL WIRING - CORE ZONE AND EQUIPMENT LIST",
-    "71-70 - POWER PLANT DRAINS",
-    "71-71 - DRAIN SYSTEM",
-    "71-73 - OIL/HYD/WATER DRAINS",
-    "72-62 - (CFMI) - TRANSFER GEARBOX ASSEMBLY",
-    "72-00 - ENGINE - GENERAL",
-    "72-20 - AIR INLET SECTION",
-    "72-21 - FAN AND BOOSTER MODULE",
-    "72-22 - NO.1 AND NO.2 BEARING SUPPORT MODULE",
-    "72-23 - FAN CASE MODULE",
-    "72-24 - FAN FRAME MODULE",
-    "72-30 - HIGH PRESSURE COMPRESSOR (HPC) MODULE ASSEMBLY",
-    "72-31 - HIGH PRESSURE COMPRESSOR (HPC) ROTOR ASSEMBLY",
-    "72-32 - FORWARD COMPRESSOR STATOR ASSEMBLY",
-    "72-40 - COMBUSTION SECTION",
-    "72-41 - COMBUSTOR DIFFUSER NOZZLE ASSEMBLY",
-    "72-42 - COMBUSTION CHAMBER ASSEMBLY",
-    "72-50 - TURBINE SECTION",
-    "72-51 - STAGE 1 HIGH PRESSURE TURBINE (HPT) NOZZLE ASSEMBLY",
-    "72-52 - HPT ROTOR ASSEMBLY",
-    "72-53 - STAGE 2 HPT NOZZLE ASSEMBLY",
-    "72-54 - TURBINE CENTER FRAME ASSEMBLY",
-    "72-56 - LPT STAGE 1 NOZZLE ASSEMBLY",
-    "72-57 - LPT SHAFT MODULE",
-    "72-58 - LPT ROTOR AND STATOR MODULE",
-    "72-59 - TURBINE REAR FRAME MODULE",
-    "72-60 - ACCESSORY DRIVES",
-    "72-61 - INLET GEARBOX (IGB) AND NO.3 BEARING ASSEMBLY",
-    "72-62 - TRANSFER GEARBOX (TGB) ASSEMBLY",
-    "72-63 - ACCESSORY GEARBOX (AGB) ASSEMBLY",
-    "72-00 - ENGINE - GENERAL",
-    "72-21 - FAN AND BOOSTER ASSEMBLY",
-    "72-22 - NO.1 AND NO.2 BEARING SUPPORT ASSEMBLY",
-    "72-23 - FAN FRAME ASSEMBLY",
-    "72-30 - HP COMPRESSOR SECTION",
-    "72-31 - HPC ROTOR ASSEMBLY",
-    "72-32 - HPC FRONT STATOR ASSEMBLY",
-    "72-33 - HPC REAR STATOR ASSEMBLY",
-    "72-40 - COMBUSTION SECTION",
-    "72-41 - COMBUSTION CASE ASSEMBLY",
-    "72-42 - COMBUSTION CHAMBER ASSEMBLY",
-    "72-50 - TURBINE SECTION",
-    "72-51 - HPT NOZZLE ASSEMBLY",
-    "72-52 - HPT ROTOR ASSEMBLY",
-    "72-53 - HPT SHROUD AND STAGE 1 LPT NOZZLE ASSEMBLY",
-    "72-54 - LPT ROTOR/STATOR ASSEMBLY",
-    "72-55 - LPT SHAFT",
-    "72-56 - TURBINE FRAME ASSEMBLY",
-    "72-60 - ACCESSORY DRIVE SECTION",
-    "72-61 - INLET GEARBOX ASSEMBLY",
-    "72-62 - TRANSFER GEARBOX ASSEMBLY",
-    "72-63 - ACCESSORY GEARBOX ASSEMBLY",
-    "73-00 - ENGINE FUEL AND CONTROL - GENERAL",
-    "73-10 - DISTRIBUTION",
-    "73-11 - ENGINE FUEL DISTRIBUTION COMPONENTS",
-    "73-20 - CONTROLLING",
-    "73-21 - ENGINE CONTROLLING COMPONENTS",
-    "73-25 - FUNCTIONAL INTERFACES",
-    "73-29 - FULL AUTHORITY DIGITAL ENGINE CONTROL (FADEC) SYSTEM",
-    "73-30 - INDICATING",
-    "73-31 - FUEL FLOW INDICATING",
-    "73-34 - FUEL FILTER CLOGGING WARNING SYSTEM",
-    "73-00 - ENGINE FUEL AND CONTROL - GENERAL",
-    "73-10 - DISTRIBUTION",
-    "73-11 - DISTRIBUTION",
-    "73-20 - CONTROLLING",
-    "73-21 - CONTROLLING",
-    "73-25 - FUNCTIONAL INTERFACES",
-    "73-29 - FADEC SYSTEM",
-    "73-30 - INDICATING",
-    "73-31 - FUEL FLOW INDICATING",
-    "73-34 - FUEL FILTER CLOGGING WARNING SYSTEM",
-    "74-00 - IGNITION - GENERAL",
-    "74-10 - ELECTRICAL POWER SUPPLY",
-    "74-11 - IGNITION POWER SUPPLY",
-    "74-20 - DISTRIBUTION",
-    "74-21 - IGNITION DISTRIBUTION COMPONENTS",
-    "74-30 - SWITCHING",
-    "74-31 - IGNITION STARTING AND CONTINUOUS RELIGHT",
-    "74-00 - IGNITION - GENERAL",
-    "74-10 - ELECTRICAL POWER SUPPLY",
-    "74-11 - IGNITION POWER SUPPLY",
-    "74-20 - DISTRIBUTION",
-    "74-21 - HIGH VOLTAGE DISTRIBUTION SYSTEM",
-    "74-30 - SWITCHING",
-    "74-31 - IGNITION STARTING AND CONTINUOUS RELIGHT",
-    "75-00 - AIR - GENERAL",
-    "75-10 - ENGINE ANTI-ICING",
-    "75-11 - ENGINE ANTI-ICING COMPONENTS",
-    "75-20 - COOLING",
-    "75-21 - HPT ACTIVE CLEARANCE CONTROL (ACC) SYSTEM",
-    "75-22 - LPT ACTIVE CLEARANCE CONTROL (ACC) SYSTEM",
-    "75-23 - MODULATED TURBINE CONTROL AND CORE", "COMPARTMENT COOLING SYSTEM",
-    "75-24 - ELECTRONIC ENGINE CONTROL (EEC) COOLING SYSTEM",
-    "75-26 - REVERSE BLEED SYSTEM COOLING",
-    "75-30 - COMPRESSOR CONTROL",
-    "75-31 - VARIABLE BLEED VALVE (VBV) SYSTEM",
-    "75-32 - VARIABLE STATOR VANE (VSV) SYSTEM",
-    "75-33 - TRANSIENT BLEED VALVE (TBV) SYSTEM",
-    "75-00 - AIR - GENERAL",
-    "75-20 - COOLING",
-    "75-21 - HPT ACTIVE CLEARANCE CONTROL SYSTEM",
-    "75-22 - LPT ACTIVE CLEARANCE CONTROL SYSTEM",
-    "75-23 - ROTOR ACTIVE CLEARANCE CONTROL SYSTEM (RACC) ",
-    "75-24 - ECU COOLING SYSTEM",
-    "75-25 - NACELLE COMPARTMENT AND ACCESSORY COOLING",
-    "75-26 - TRANSIENT BLEED VALVE SYSTEM",
-    "75-27 - IGNITION SYSTEM COOLING",
-    "75-30 - COMPRESSOR CONTROL",
-    "75-31 - VARIABLE BLEED VALVE SYSTEM (VBV) ",
-    "75-32 - VARIABLE STATOR VANE SYSTEM (VSV) ",
-    "75-41 - NACELLE TEMPERATURE INDICATING",
-    "76-00 - ENGINE CONTROLS - GENERAL",
-    "76-10 - POWER CONTROLS",
-    "76-11 - THROTTLE CONTROL",
-    "76-12 - ENGINE MASTER CONTROL",
-    "77-00 - ENGINE INDICATING - GENERAL",
-    "77-10 - POWER",
-    "77-11 - POWER INDICATING SYSTEM",
-    "77-20 - TEMPERATURE",
-    "77-21 - EXHAUST GAS TEMPERATURE SYSTEM",
-    "77-22 - CORE COMPARTMENT TEMPERATURE SYSTEM",
-    "77-30 - ANALYZERS",
-    "77-31 - VIBRATION SENSORS",
-    "77-00 - ENGINE INDICATING - GENERAL",
-    "77-10 - POWER",
-    "77-11 - N1 ROTATIONAL SPEED INDICATING SYSTEM",
-    "77-20 - TEMPERATURE",
-    "77-21 - EXHAUST GAS TEMPERATURE INDICATING SYSTEM",
-    "77-22 - T5 THERMOCOUPLE",
-    "77-23 - T3 THERMOCOUPLE",
-    "77-30 - ANALYZERS",
-    "77-31 - VIBRATION SENSORS",
-    "77-32 - ENGINE VIBRATION INDICATING SYSTEM",
-    "78-00 - EXHAUST - GENERAL",
-    "78-10 - COLLECTOR/NOZZLE",
-    "78-11 - HOT EXHAUST",
-    "78-12 - EXHAUST NOZZLE",
-    "78-30 - THRUST REVERSER",
-    "78-31 - THRUST REVERSER (T/R) CONTROL AND INDICATING",
-    "78-32 - THRUST REVERSER STRUCTURE",
-    "78-36 - COWL - THRUST REVERSER OPENING MECHANISM",
-    "78-37 - THRUST REVERSER INDEPENDENT LOCKING SYSTEM",
-    "78-00 - EXHAUST - GENERAL",
-    "78-11 - HOT EXHAUST",
-    "78-30 - THRUST REVERSER",
-    "78-31 - THRUST REVERSER CONTROL AND INDICATING",
-    "78-32 - THRUST REVERSER STRUCTURE",
-    "78-33 - THRUST REVERSER SYSTEM COMPONENTS",
-    "78-36 - THRUST REVERSER OPENING MECHANISM",
-    "78-37 - THRUST REVERSER INDEPENDENT LOCKING SYSTEM",
-    "79-00 - OIL - GENERAL",
-    "79-10 - STORAGE",
-    "79-11 - OIL TANK",
-    "79-20 - DISTRIBUTION",
-    "79-21 - OIL DISTRIBUTION COMPONENTS",
-    "79-22 - DUCTING",
-    "79-30 - INDICATING",
-    "79-31 - OIL QUANTITY INDICATING SYSTEM",
-    "79-32 - OIL PRESSURE/TEMPERATURE INDICATING SYSTEM",
-    "79-34 - LOW OIL PRESSURE WARNING SYSTEM",
-    "79-35 - OIL FILTER CLOGGING WARNING SYSTEM",
-    "79-36 - DEBRIS MONITORING SYSTEM",
-    "79-00 - OIL - GENERAL",
-    "79-11 - OIL TANK",
-    "79-20 - DISTRIBUTION",
-    "79-21 - DISTRIBUTION",
-    "79-30 - INDICATING",
-    "79-31 - OIL QUANTITY INDICATING SYSTEM",
-    "79-32 - OIL TEMPERATURE INDICATING SYSTEM",
-    "79-33 - OIL PRESSURE INDICATING SYSTEM",
-    "79-34 - LOW OIL PRESSURE WARNING SYSTEM",
-    "79-35 - OIL FILTER CLOGGING WARNING SYSTEM",
-    "79-36 - DEBRIS MONITORING SYSTEM",
-    "80-00 - STARTING - GENERAL",
-    "80-10 - CRANKING",
-    "80-11 - PNEUMATIC STARTER AND VALVE SYSTEM",
-    "80-12 - DUCTING",
-    "80-00 - STARTING - GENERAL",
-    "80-10 - CRANKING",
-    "80-11 - PNEUMATIC STARTER AND VALVE SYSTEM",
-    "80-13 - DUCTING",
-
-]
-
 # ---------------------------------------------------------
-# ANTARMUKA UTAMA
+# ANTARMUKA UTAMA: DEFECT & RELIABILITY ANALYZER
 # ---------------------------------------------------------
 st.title("🛠️ Defect & Reliability Analyzer")
 st.write("Sistem Analisis Rekayasa Keandalan Penerbangan Berbasis Histori Maintenance & Gemini AI.")
 
+# Definisikan 3 kolom secara bersamaan di sini
 col_ac, col_reg, col_ata = st.columns([1.5, 1.5, 3])
 
 with col_ac:
@@ -1347,16 +564,12 @@ with col_reg:
     )
 
 with col_ata:
-    selected_ata_raw = st.selectbox(
-        "🏷️ ATA Chapter (4-Digit):",
-        options=ATA_4DIGIT_OPTIONS,
-        help="Pilih sub-sistem ATA Chapter 4-digit yang sesuai."
+    selected_ata = st.text_input(
+        "🏷️ ATA Chapter (Opsional - Ketik Bebas):",
+        placeholder="Contoh: 34-11 atau 28-10",
+        help="Ketik nomor ATA chapter manual sesuai kebutuhan, atau kosongkan agar RAG mendeteksi otomatis."
     )
     
-    if selected_ata_raw != "-- Pilih ATA Chapter --":
-        selected_ata = selected_ata_raw.split(" | ")[0].strip()
-    else:
-        selected_ata = ""
 
 kasus_baru = st.text_area(
     "Masukkan Deskripsi Defect / Discrepancy Baru:",
@@ -1375,12 +588,18 @@ if uploaded_file is not None and uploaded_file.type.startswith("image/"):
 # =========================================================================
 # PROSES KETIKA TOMBOL "Analisis Kasus & History" DIKLIK
 # =========================================================================
-if st.button("Analisis Kasus & History", type="primary"):
-    if not api_key_input.strip():
+if st.button("Analisis Kasus & History", key="btn_analisis_kasus", type="primary"):
+    if not api_key_input.strip() and not os.environ.get("GEMINI_API_KEY"):
         st.error("⚠️ Silakan masukkan Gemini API Key Anda pada menu Sidebar di sebelah kiri terlebih dahulu.")
     elif not kasus_baru.strip():
         st.warning("⚠️ Silakan masukkan deskripsi defect atau discrepancy terlebih dahulu.")
     else:
+        # --- PANGGIL SISTEM RAG LOKAL ---
+        with st.spinner("Memindai manual referensi PDF lokal (RAG)..."):
+            rag_context, detected_ata = search_reference_library(ac_type, kasus_baru)
+            if not selected_ata and detected_ata != "N/A":
+                selected_ata = detected_ata
+
         df_defect = load_defect_db_by_sheet(ac_type)
         
         if df_defect.empty:
@@ -1441,7 +660,6 @@ if st.button("Analisis Kasus & History", type="primary"):
                 else:
                     history_match = df_ata_subset.copy()
 
-            # --- SISTEM FALLBACK & FILTER 4-DIGIT PRESISI ---
             df_gemini_trend = history_match.copy() if not history_match.empty else pd.DataFrame()
             
             search_pattern = ""
@@ -1483,24 +701,24 @@ if st.button("Analisis Kasus & History", type="primary"):
 
             st.session_state['ac_type'] = ac_type
             st.session_state['ac_reg'] = ac_reg
-            st.session_state['kasus_baru'] = kasus_baru
+            st.session_state['kasus_baru'] = kasus_baru  # <-- DIPERBAIKI AGAR TAMPIL DI SECTION 1
             st.session_state['selected_ata'] = selected_ata
             st.session_state['history_match'] = df_history_sorted
 
             if jumlah_filtered_match >= 5:
                 selected_method_instruction = """
-            [METODE ANALISIS YANG WAJIB DIGUNAKAN: FISHBONE / ISHIKAWA DIAGRAM]
-            1. Tuliskan terlebih dahulu paragraf tinjauan tren & korelasi historis di awal.
-            2. Buatlah diagram Fishbone / Ishikawa menggunakan teks ASCII di dalam blok kode (``` ... ```).
-            3. SETELAH diagram Fishbone, wajib tuliskan paragraf analisis dan evaluasi mendalam yang mengulas poin-poin penyebab utama dari diagram tersebut (misalnya analisis faktor Machine, Material, Method, dan Environment).
-            """
+                [METODE ANALISIS YANG WAJIB DIGUNAKAN: FISHBONE / ISHIKAWA DIAGRAM]
+                1. Tuliskan terlebih dahulu paragraf tinjauan tren & korelasi historis di awal.
+                2. Buatlah diagram Fishbone / Ishikawa menggunakan teks ASCII di dalam blok kode (``` ... ```).
+                3. SETELAH diagram Fishbone, wajib tuliskan paragraf analisis dan evaluasi mendalam yang mengulas poin-poin penyebab utama dari diagram tersebut (misalnya analisis faktor Machine, Material, Method, dan Environment).
+                """
             else:
                 selected_method_instruction = """
-            [METODE ANALISIS YANG WAJIB DIGUNAKAN: 5 WHYS INVESTIGATION]
-            1. Tuliskan paragraf tinjauan tren di awal.
-            2. Buat penelusuran 5 Whys di dalam blok kode (``` ... ```).
-            3. SETELAH penelusuran 5 Whys, wajib tuliskan paragraf evaluasi kesimpulan akar masalah.
-            """
+                [METODE ANALISIS YANG WAJIB DIGUNAKAN: 5 WHYS INVESTIGATION]
+                1. Tuliskan paragraf tinjauan tren di awal.
+                2. Buat penelusuran 5 Whys di dalam blok kode (``` ... ```).
+                3. SETELAH penelusuran 5 Whys, wajib tuliskan paragraf evaluasi kesimpulan akar masalah.
+                """
 
             additional_file_instruction = ""
             if uploaded_file is not None:
@@ -1519,6 +737,9 @@ REGISTRASI PESAWAT: {ac_reg if ac_reg else 'N/A'}
 KASUS BARU YANG DILAPORKAN:
 {kasus_baru} (ATA Chapter Target: {selected_ata if selected_ata else 'N/A'})
 {additional_file_instruction}
+
+REFERENSI MANUAL PDF RESMI (RAG):
+{rag_context}
 
 DATA HISTORI DARI DATABASE UNSCHEDULED ARMADA {ac_type} (Spesifik Sub-sistem ATA {selected_ata}):
 - Total Ditemukan: {jumlah_filtered_match} record/kejadian defect serupa.
@@ -1552,7 +773,7 @@ Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type
 (Provide exact Recommendations translated into professional aviation engineering English)
 """
 
-            with st.spinner(f"Menganalisis histori & dokumen lampiran armada {ac_type} via Gemini..."):
+            with st.spinner(f"Menganalisis histori, dokumen RAG, & lampiran armada {ac_type} via Gemini..."):
                 try:
                     full_text = call_gemini_api(prompt, api_key_input, uploaded_file=uploaded_file)
                 except Exception as e:
@@ -1607,6 +828,7 @@ Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type
 
                     report_key_label, dan_code = get_next_dan_key(ac_type, kasus_baru)
                     st.session_state['current_dan_key'] = report_key_label
+                    st.session_state['dan_code'] = dan_code
                     
                     df_history_to_save = df_history_sorted.copy()
                     for col in df_history_to_save.columns:
@@ -1623,8 +845,6 @@ Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type
                         "history_match": df_history_to_save.to_dict(orient="records") if not df_history_sorted.empty else []
                     }
                     save_report_to_disk(report_key_label, report_payload)
-                    
-                    # Refresh halaman agar bagian 1 sampai 5 langsung muncul
                     st.rerun()
 
 # ---------------------------------------------------------
@@ -1676,45 +896,34 @@ if 'iterations' in st.session_state and st.session_state['iterations']:
             rca_text = iter_data.get('ai_rca_id', '')
             rec_text = iter_data.get('ai_rec_id', '')
 
-        # 1. TAMPILKAN SYSTEM DESCRIPTION
         if sys_text:
             st.markdown("### 2. SYSTEM DESCRIPTION & OPERATIONAL PRINCIPLES")
             st.markdown(sys_text)
 
-        # 2. TAMPILKAN RCA (URUTAN: REVIEW -> DIAGRAM -> ANALISIS PENUTUP DIAGRAM)
         if rca_text:
             st.markdown("### 3. REPETITIVE DEFECT ANALYSIS & ROOT CAUSE ANALYSIS (RCA)")
-            
-            # Bersihkan tag penanda dari Gemini
             clean_rca = rca_text.replace("[RCA_REVIEW]", "").replace("[RCA]", "").strip()
             
-            # Pisahkan menjadi 3 bagian jika ada blok kode diagram (```)
             if "```" in clean_rca:
                 parts_code = clean_rca.split("```")
-                rca_before = parts_code[0].strip()                    # 1. Analisis/Tinjauan awal di atas diagram
-                diagram_content = "```" + parts_code[1] + "```"       # 2. Diagram Fishbone
-                rca_after = parts_code[2].strip() if len(parts_code) > 2 else "" # 3. Analisis/Review penutup di bawah diagram
+                rca_before = parts_code[0].strip()
+                diagram_content = "```" + parts_code[1] + "```"
+                rca_after = parts_code[2].strip() if len(parts_code) > 2 else ""
             else:
                 rca_before = clean_rca
                 diagram_content = ""
                 rca_after = ""
             
-            # TAHAP 1: Tampilkan Tinjauan / Analisis Awal di atas diagram
             if rca_before:
                 st.markdown(rca_before)
-            
-            # TAHAP 2: Tampilkan Diagram Fishbone di tengah
             if diagram_content:
                 st.markdown(diagram_content)
-                
-            # TAHAP 3: Tampilkan Analisis / Review terhadap Diagram Fishbone di bawahnya
             if rca_after:
                 st.markdown("#### Analisis & Evaluasi Root Cause:")
                 st.markdown(rca_after)
             
             st.markdown("---")
             
-        # 4. TAMPILKAN RECOMMENDATIONS
         if rec_text:
             st.markdown("### 4. CORRECTIVE & PREVENTIVE RECOMMENDATIONS")
             st.markdown(rec_text)
@@ -1742,23 +951,17 @@ if 'iterations' in st.session_state and st.session_state['iterations']:
             if not feedback_text.strip() and uploaded_feedback_file is None:
                 st.warning("⚠️ Masukkan catatan temuan perbaikan atau lampirkan file sebelum menjalankan analisis lanjutan.")
             else:
-                active_api_key = st.session_state.get('user_api_key', '').strip()
+                active_api_key = st.session_state.get('user_api_key', '').strip() or os.environ.get("GEMINI_API_KEY", "")
                 if not active_api_key:
                     st.error("⚠️ API Key tidak ditemukan di sidebar. Silakan masukkan API Key di panel sebelah kiri.")
                 else:
-                    if 'all_reports' not in locals() and 'all_reports' not in globals():
-                        all_reports = load_reports_from_json() if 'load_reports_from_json' in globals() else []
-
                     active_dan = st.session_state.get('dan_code', None)
                     current_report = None
                     
-                    if 'all_reports' in locals() and all_reports:
-                        for rep in all_reports:
-                            if rep.get("dan_number") == active_dan:
-                                current_report = rep
-                                break
-                        if not current_report:
-                            current_report = all_reports[-1]
+                    saved_reps = load_saved_reports()
+                    current_report_key = st.session_state.get('current_dan_key', None)
+                    if current_report_key and current_report_key in saved_reps:
+                        current_report = saved_reps[current_report_key]
                     
                     if not current_report:
                         current_report = {
@@ -1767,10 +970,8 @@ if 'iterations' in st.session_state and st.session_state['iterations']:
                             "ac_reg": st.session_state.get('ac_reg', ''),
                             "kasus_baru": st.session_state.get('kasus_baru', ''),
                             "selected_ata": st.session_state.get('selected_ata', ''),
-                            "iterations": []
+                            "iterations": st.session_state.get('iterations', [])
                         }
-                        if 'all_reports' in locals():
-                            all_reports.append(current_report)
 
                     previous_iterations = current_report.get("iterations", [])
                     iteration_number = len(previous_iterations) + 1
@@ -1840,8 +1041,8 @@ Rekomendasi tindakan teknis lanjutan, pemeriksaan komponen sekunder, atau penyes
                             current_report.setdefault("iterations", []).append(new_iteration)
                             st.session_state['iterations'].append(new_iteration)
                             
-                            if 'save_reports_to_json' in globals() and 'all_reports' in locals():
-                                save_reports_to_json(all_reports)
+                            if current_report_key:
+                                save_report_to_disk(current_report_key, current_report)
 
                             st.success(f"✅ Analisis Lanjutan Iterasi ke-{iteration_number} berhasil ditambahkan dan disimpan!")
                             st.rerun()
@@ -1851,7 +1052,7 @@ Rekomendasi tindakan teknis lanjutan, pemeriksaan komponen sekunder, atau penyes
 
 st.markdown("---")
 
-# --- SECTION 1: DOWNLOAD LAPORAN PDF ---
+# --- SECTION: DOWNLOAD LAPORAN PDF ---
 col_pdf1, col_pdf2 = st.columns([2, 2])
 with col_pdf1:
     pdf_lang = st.radio(
@@ -1889,72 +1090,85 @@ with col_pdf2:
 
 # --- SECTION 2: HISTORICAL RECORD ---
 st.markdown("---")
-st.subheader(f"5. HISTORICAL RECORD (Database Unscheduled {st.session_state.get('ac_type', '')} - {len(df_hist_pdf)} Record Ditemukan):")
+ac_name_display = st.session_state.get('ac_type', '')
+record_count = len(df_hist_pdf)
+st.subheader(f"5. HISTORICAL RECORD (Database Unscheduled {ac_name_display}: {record_count} Record Ditemukan):")
 
 if not df_hist_pdf.empty:
     st.dataframe(df_hist_pdf, use_container_width=True)
 else:
     st.info("Tidak ada catatan riwayat histori yang ditemukan.")
 
-import streamlit as st
-import io
 
-# ==========================================
-# 2. ANTARMUKA INPUT FORMULIR STREAMLIT
-# ==========================================
+# =========================================================================
+# ENGINEERING ORDER GENERATOR (FORM ATD-F-308) - DI BAWAH BAGIAN 5
+# =========================================================================
+st.markdown("---")
 st.title("Airfast Indonesia - Engineering Order Generator")
 st.subheader("Formulir Input Data Engineering Order")
 
 eo_number = st.text_input("Nomor EO", "EO/2026/001")
-eo_title = st.text_input("Subject / Judul EO", "Inspection of Lavatory Door Mechanism")
-compliance_category = st.selectbox("Classification", ["Mandatory", "Recommended", "Optional"])
-man_hours = st.text_input("Estimasi Man Power", "2 Man-Hours")
-part_number = st.text_input("Material / Parts Required", "N/A")
+eo_title = st.text_input("Subject / Judul EO", "Inspection and Rectification of Aircraft System")
+compliance_category = st.selectbox("Classification", ["Mandatory", "Recommended", "Optional"], key="eo_class")
 
-# <-- TARUH KODE PILIHAN ARMADA & UPLOAD DI SINI (SEBELUM TOMBOL GENERATE) -->
-aircraft_type = st.selectbox(
-    "Pilih Tipe Armada Pesawat",
-    ["DHC6_Twin_Otter", "Bell_412", "Boeing_737MAX"]
+# Kolom Man-Power & Material / Part Number diringkas/dihapus karena diekstrak otomatis oleh AI
+
+eo_aircraft_type = st.selectbox(
+    "Pilih Tipe Armada Pesawat (EO)",
+    ["DHC6-300", "DHC6-400", "B737-8", "Bell412", "AS350B3", "MIL171"],
+    key="eo_ac_type"
 )
 
 uploaded_custom_files = st.file_uploader(
     "Unggah Dokumen Pendukung / Foto Defect Tambahan (Opsional)",
     type=["pdf", "txt", "png", "jpg", "jpeg"],
-    accept_multiple_files=True
+    accept_multiple_files=True,
+    key="eo_custom_files"
 )
 
 st.markdown("---")
 
-# ==========================================
-# 3. TOMBOL EKSEKUSI UTAMA (GENERATE DRAF EO)
-# ==========================================
-if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
-    with st.spinner("Membaca manual referensi dari server & menyusun draf EO..."):
+if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)", key="btn_gen_eo"):
+    with st.spinner("Membaca manual referensi spesifik & menyusun draf EO otomatis via AI..."):
         try:
-            # Pastikan API key terkonfigurasi
             api_key = os.environ.get("GEMINI_API_KEY", st.session_state.get('user_api_key', ''))
             genai.configure(api_key=api_key)
 
-            ref_text_content = ""
+            # Ambil konteks kasus aktif atau judul EO agar pencarian manual PDF lebih spesifik
+            current_defect_topic = st.session_state.get('kasus_baru', eo_title)
+            current_ata_topic = st.session_state.get('selected_ata', '')
 
-            # A. AMBIL REFERENSI OTOMATIS DARI FOLDER SERVER BERDASARKAN ARMADA
-            folder_path = os.path.join("reference_library", aircraft_type)
+            ref_text_content = ""
+            folder_path = os.path.join("reference_library", eo_aircraft_type)
             if os.path.exists(folder_path):
                 ref_files = [f for f in os.listdir(folder_path) if f.lower().endswith('.pdf')]
                 
-                for file_name in ref_files[:3]:  # Batasi beberapa file utama untuk efisiensi konteks
+                # Filter file PDF yang namanya/isinya paling mendekati ATA atau topik defect jika memungkinkan
+                for file_name in ref_files:
                     file_path = os.path.join(folder_path, file_name)
-                    ref_text_content += f"\n\n--- SERVER MANUAL REF ({file_name}) ---\n"
                     try:
                         with pdfplumber.open(file_path) as pdf:
-                            for page_idx, page in enumerate(pdf.pages[:2]):  # Ambil halaman awal chapter
+                            for page_idx, page in enumerate(pdf.pages[:15]): # Cek hingga 15 halaman per PDF
                                 text = page.extract_text()
                                 if text:
-                                    ref_text_content += f"[Page {page_idx+1}]\n{text}\n"
-                    except Exception as e:
-                        ref_text_content += f"(Failed to read server file: {str(e)})"
+                                    text_upper = text.upper()
+                                    # Cocokkan apakah halaman mengandung nomor ATA atau kata kunci topik (misal: LIGHT)
+                                    if (current_ata_topic and current_ata_topic[:2] in text_upper) or \
+                                       any(kw in text_upper for kw in current_defect_topic.upper().split() if len(kw) > 3):
+                                        ref_text_content += f"\n\n--- SERVER MANUAL REF ({file_name} - Page {page_idx+1}) ---\n{text[:1000]}\n"
+                                        break
+                    except Exception:
+                        continue
 
-            # B. AMBIL TAMBAHAN DARI UNGGAHAN USER (JIKA ADA)
+            # Jika pencarian spesifik tidak menemukan hasil, ambil cuplikan umum dari file pertama
+            if not ref_text_content and ref_files:
+                file_path = os.path.join(folder_path, ref_files[0])
+                with pdfplumber.open(file_path) as pdf:
+                    for page_idx, page in enumerate(pdf.pages[:3]):
+                        text = page.extract_text()
+                        if text:
+                            ref_text_content += f"\n\n--- SERVER MANUAL REF ({ref_files[0]}) ---\n{text}\n"
+
             if uploaded_custom_files:
                 for file in uploaded_custom_files:
                     ref_text_content += f"\n\n--- USER UPLOAD ({file.name}) ---\n"
@@ -1967,63 +1181,44 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)"):
                     elif file.name.lower().endswith('.txt'):
                         ref_text_content += file.read().decode('utf-8', errors='ignore')
 
-            # C. Definisikan Prompt AI dalam Bahasa Inggris
             prompt_eo = f"""
-            Act as a Senior Technical Services & Reliability Engineer at PT Airfast Indonesia.
-            Your task is to draft a formal, high-standard Engineering Order (EO) following Form ATD-F-308 based on the server reference manuals and user inputs.
+Act as a Senior Technical Services & Reliability Engineer at PT Airfast Indonesia.
+Your task is to draft a formal, high-standard Engineering Order (EO) following Form ATD-F-308 strictly based on the specific defect case and reference manuals below. Do not mix it up with other ATA chapters (such as fuel or hydraulics unless specified).
 
-            SELECTED AIRCRAFT FLEET: {aircraft_type}
-            - EO Number: {eo_number}
-            - Subject: {eo_title}
-            - Classification: {compliance_category}
-            - Estimated Man Power: {man_hours}
-            - Material / Parts Required: {part_number}
-            
-            REFERENCE TEXT EXTRACTED (SERVER & USER):
-            {ref_text_content if ref_text_content else "Use standard fleet references."}
+SELECTED AIRCRAFT FLEET: {eo_aircraft_type}
+- EO Number: {eo_number}
+- Subject / Defect Focus: {eo_title} (Reported Defect Context: {current_defect_topic}, ATA Chapter: {current_ata_topic if current_ata_topic else 'Auto-detect'})
+- Classification: {compliance_category}
+- Estimated Man Power & Material / Parts Required: (Extract and determine these automatically based strictly on the target system/component)
 
-            OUTPUT FORMAT INSTRUCTIONS:
-            - Write the entire draft in professional English.
-            - Follow the formal Airfast Indonesia Form ATD-F-308 structure precisely:
-              1. Reason of Issuance
-              2. Description & Background
-              3. Reference Documents
-              4. Compliance & Applicability
-              5. Tools & Parts Required
-              6. Man Power Estimation
-              7. Accomplishment Instructions
-              8. Return to Service (RTS)
-              9. Authorization & Sign-Off
-            """
+RELEVANT REFERENCE TEXT EXTRACTED (SERVER & USER):
+{ref_text_content if ref_text_content else "Use standard fleet references for this specific system."}
 
-            # D. Panggil Model AI
-            active_model = genai.GenerativeModel('gemini-3.8-flash') # atau model yang Anda gunakan
+OUTPUT FORMAT INSTRUCTIONS:
+- Write the entire draft in professional English.
+- Follow the formal Airfast Indonesia Form ATD-F-308 structure precisely:
+  1. Reason of Issuance
+  2. Description & Background (Must focus precisely on the reported defect/subject, e.g., Landing Light / ATA 33)
+  3. Reference Documents
+  4. Compliance & Applicability
+  5. Tools & Parts Required (Extracted automatically)
+  6. Man Power Estimation (Extracted automatically)
+  7. Accomplishment Instructions
+  8. Return to Service (RTS)
+  9. Authorization & Sign-Off
+"""
+            active_model = genai.GenerativeModel('gemini-3.8-flash')
             response = active_model.generate_content(prompt_eo)
-            
-            # SIMPAN KE SESSION STATE AGAR TIDAK HILANG SAAT RERUN
             st.session_state['generated_eo_text'] = response.text
-
         except Exception as e:
             st.error(f"Gagal memproses draf EO: {e}")
 
-# ==========================================
-# 4. MODUL PEMBUAT PDF (Ditaruh di luar blok tombol)
-# ==========================================
-
-import os
-from fpdf import FPDF
-
 def create_eo_pdf_bytes(eo_text):
-    """Fungsi pembuat PDF rapi, mengalir utuh, tanpa terpotong atau loncat-loncat"""
     pdf = FPDF(orientation='P', unit='mm', format='A4')
-    
-    # Margin kiri 8mm, margin kanan 4mm agar rapat ke tepi kanan
     pdf.set_margins(left=8, top=10, right=4)
     pdf.add_page()
     
     font_loaded = False
-    
-    # 1. Cek folder repository proyek 'fonts/' (untuk Streamlit Cloud / Linux)
     if os.path.exists("fonts/calibri.ttf"):
         try:
             pdf.add_font("Calibri", "", "fonts/calibri.ttf", uni=True)
@@ -2033,7 +1228,6 @@ def create_eo_pdf_bytes(eo_text):
         except Exception:
             pass
             
-    # 2. Cek direktori Windows (untuk komputer lokal Bapak)
     if not font_loaded and os.path.exists("C:/Windows/Fonts/calibri.ttf"):
         try:
             pdf.add_font("Calibri", "", "C:/Windows/Fonts/calibri.ttf", uni=True)
@@ -2043,53 +1237,41 @@ def create_eo_pdf_bytes(eo_text):
         except Exception:
             pass
             
-    # 3. Fallback jika font kustom tidak ditemukan
     if not font_loaded:
         font_name = "Arial"
 
-    # Header Dokumen Perusahaan
     pdf.set_font(font_name, "B", 14)
     pdf.cell(0, 8, "PT AIRFAST INDONESIA", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.set_font(font_name, "B", 11)
     pdf.cell(0, 6, "ENGINEERING ORDER - FORM ATD-F-308", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(4)
     
-    # Isi Konten Draf EO dengan font ukuran 11
     pdf.set_font(font_name, size=11)
-    
     for line in eo_text.split('\n'):
-        # Bersihkan karakter khusus Unicode dan markdown
         sanitized_line = (line.replace("–", "-")
-                              .replace("—", "-")
-                              .replace("“", '"')
-                              .replace("”", '"')
-                              .replace("‘", "'")
-                              .replace("’", "'")
-                              .replace("Ω", "Ohm")
-                              .replace("±", "+/-")
-                              .replace("°", " deg ")
-                              .replace("|", " ")
-                              .replace("---", "")
-                              .replace("___", "")
-                              .replace("**", "")
-                              .replace("###", "")
-                              .strip())
-        
+                            .replace("—", "-")
+                            .replace("“", '"')
+                            .replace("”", '"')
+                            .replace("‘", "'")
+                            .replace("’", "'")
+                            .replace("Ω", "Ohm")
+                            .replace("±", "+/-")
+                            .replace("°", " deg ")
+                            .replace("|", " ")
+                            .replace("---", "")
+                            .replace("___", "")
+                            .replace("**", "")
+                            .replace("###", "")
+                            .strip())
         if not sanitized_line:
-            pdf.ln(3) # Spasi antar baris kosong
+            pdf.ln(3)
             continue
-            
-        # Cetak baris paragraf secara utuh menggunakan multi_cell dengan arah perpindahan kursor yang jelas
         pdf.multi_cell(0, 5.5, sanitized_line, align='L', new_x="LMARGIN", new_y="NEXT")
         
     return bytes(pdf.output())
 
-# ==========================================
-# 5. TAMPILKAN TOMBOL DOWNLOAD (Di luar blok try/except)
-# ==========================================
 if 'generated_eo_text' in st.session_state and st.session_state['generated_eo_text']:
     generated_eo_text = st.session_state['generated_eo_text']
-    
     st.success("Engineering Order (Form ATD-F-308) English draft successfully generated!")
     st.markdown("### 📋 Official Engineering Order Draft (ATD-F-308 - English)")
     st.code(generated_eo_text, language="markdown")
@@ -2100,5 +1282,6 @@ if 'generated_eo_text' in st.session_state and st.session_state['generated_eo_te
         label="📥 Download Official Engineering Order (PDF)",
         data=pdf_bytes,
         file_name=f"EO_{eo_number}.pdf",
-        mime="application/pdf"
+        mime="application/pdf",
+        key="download_eo_pdf"
     )
