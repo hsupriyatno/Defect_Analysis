@@ -8,7 +8,7 @@ import json
 import base64
 import os
 from datetime import datetime
-import pdfplumber  # Pastikan pdfplumber sudah terinstall (pip install pdfplumber)
+import pdfplumber
 import tempfile
 
 # Import modul ReportLab untuk PDF
@@ -137,7 +137,7 @@ def search_reference_library(fleet_type, query_text, max_pages_per_pdf=5):
     try:
         pdf_files = [f for f in os.listdir(target_dir) if f.lower().endswith('.pdf')]
         
-        for file_name in pdf_files[:3]:
+        for file_name in pdf_files[:5]:
             file_path = os.path.join(target_dir, file_name)
             with pdfplumber.open(file_path) as pdf:
                 for page_idx, page in enumerate(pdf.pages[:max_pages_per_pdf]):
@@ -545,7 +545,6 @@ AIRCRAFT_REG_MAP = {
 st.title("🛠️ Defect & Reliability Analyzer")
 st.write("Sistem Analisis Rekayasa Keandalan Penerbangan Berbasis Histori Maintenance & Gemini AI.")
 
-# Definisikan 3 kolom secara bersamaan di sini
 col_ac, col_reg, col_ata = st.columns([1.5, 1.5, 3])
 
 with col_ac:
@@ -566,14 +565,13 @@ with col_reg:
 with col_ata:
     selected_ata = st.text_input(
         "🏷️ ATA Chapter (Opsional - Ketik Bebas):",
-        placeholder="Contoh: 34-11 atau 28-10",
+        placeholder="Contoh: 27-21 atau 34-11",
         help="Ketik nomor ATA chapter manual sesuai kebutuhan, atau kosongkan agar RAG mendeteksi otomatis."
     )
-    
 
 kasus_baru = st.text_area(
     "Masukkan Deskripsi Defect / Discrepancy Baru:",
-    placeholder="Contoh: Landing Light not illuminate"
+    placeholder="Contoh: Nose Landing Gear vibration during taxi"
 )
 
 uploaded_file = st.file_uploader(
@@ -605,83 +603,137 @@ if st.button("Analisis Kasus & History", key="btn_analisis_kasus", type="primary
         if df_defect.empty:
             st.error(f"⚠️ Database maintenance untuk armada {ac_type} kosong atau tidak ditemukan.")
         else:
-            text_upper = kasus_baru.upper()
-            
-            stop_words = {
-                "FOUND", "DURING", "PRE", "FLIGHT", "AFTER", "BEFORE", "IN", "AT", "ON", "AND", 
-                "THE", "TO", "OF", "WITH", "IS", "WAS", "FOR", "CHECK", "INSPECTED", "OUR", "AIRCRAFT",
-                "PLEASE", "KINDLY", "REPORTED", "BROKEN", "DAMAGED", "FAIL", "FAILED", "FAULT"
-            }
-            
-            raw_words = re.findall(r'\b[A-Za-z0-9]+\b', text_upper)
-            core_keywords = [w for w in raw_words if len(w) > 2 and w not in stop_words]
-            
-            mask_ata = pd.Series(True, index=df_defect.index)
-            if selected_ata.strip():
-                ata_digits = re.sub(r'\D', '', selected_ata)
-                main_ata_2digit = ata_digits[:2] if len(ata_digits) >= 2 else ata_digits
-                
-                if 'ATA' in df_defect.columns and main_ata_2digit:
-                    excel_ata_clean = df_defect['ATA'].astype(str).str.replace(r'\D', '', regex=True)
-                    mask_ata = excel_ata_clean.str.startswith(main_ata_2digit) | excel_ata_clean.str.contains(main_ata_2digit, na=False)
+            # --- 1. TENTUKAN TARGET ATA (Prioritas: Input User -> Deteksi RAG PDF -> Deteksi Teks Kasus) ---
+            target_ata_final = selected_ata.strip()
+            if not target_ata_final and 'detected_ata' in locals() and detected_ata != "N/A":
+                target_ata_final = detected_ata
+            if not target_ata_final:
+                match_ata_text = re.search(r'\b(2[0-9]|3[0-8]|5[0-7])\b', kasus_baru)
+                if match_ata_text:
+                    target_ata_final = match_ata_text.group(1)
 
-            df_ata_subset = df_defect[mask_ata] if selected_ata.strip() else df_defect
+            # --- 2. FILTER MUTLAK BERDASARKAN KOLOM 'ATA' DI EXCEL ---
+            ata_col_name = None
+            for col in df_defect.columns:
+                if col.strip().upper() == 'ATA' or 'ATA' in col.upper():
+                    ata_col_name = col
+                    break
+
+            df_ata_subset = pd.DataFrame()
+            if ata_col_name and target_ata_final:
+                # Ambil 2 digit utama angka ATA (misal "27-21" atau "27" menjadi "27")
+                clean_target_digits = re.sub(r'\D', '', target_ata_final)[:2]
+                if clean_target_digits:
+                    excel_ata_series = df_defect[ata_col_name].astype(str).str.replace(r'\D', '', regex=True)
+                    # WAJIB KETAT: Hanya ambil baris yang kolom ATA-nya diawali dengan 2 digit target
+                    mask_strict_ata = excel_ata_series.str.startswith(clean_target_digits, na=False)
+                    df_ata_subset = df_defect[mask_strict_ata].copy()
+            else:
+                df_ata_subset = df_defect.copy()
+
+            # --- 3. FILTER DUA DIMENSI: SYSTEM/COMPONENT + SYMPTOM/EVENT (FLEKSIBEL) ---
             history_match = pd.DataFrame()
             
             if not df_ata_subset.empty:
                 row_text = df_ata_subset.astype(object).fillna('').astype(str).agg(' '.join, axis=1).str.upper()
+                text_upper = kasus_baru.upper()
                 
-                if core_keywords:
-                    primary_components = [w for w in core_keywords if w in ["SPRING", "CARTRIDGE", "VALVE", "PUMP", "ACTUATOR", "SENSOR", "SWITCH", "BATTERY", "LIGHT", "MIRROR", "SEAT"]]
-                    
-                    if primary_components:
-                        primary_pattern = "|".join(primary_components)
-                        mask_strict = row_text.str.contains(primary_pattern, case=False, na=False)
-                        
-                        if "LAVATORY" in text_upper or "LAV" in text_upper:
-                            mask_lav = row_text.str.contains(r'LAVATORY|\bLAV\b', case=False, regex=True, na=False)
-                            history_match = df_ata_subset[mask_strict & mask_lav].copy()
-                        else:
-                            history_match = df_ata_subset[mask_strict].copy()
-                    else:
-                        pattern_all = ".*".join(core_keywords)
-                        mask_fallback = row_text.str.contains(pattern_all, case=False, regex=True, na=False)
-                        history_match = df_ata_subset[mask_fallback].copy()
-                        
-                        if history_match.empty:
-                            mask_any = row_text.str.contains("|".join(core_keywords), case=False, na=False)
-                            history_match = df_ata_subset[mask_any].copy()
+                # A. Deteksi Jenis Kasus (Apakah spesifik Lavatory/Pintu atau Sistem Umum/Avionik)
+                is_lavatory_case = any(k in text_upper for k in ["LAVATORY", "LAV", "TOILET", "CABIN"])
+                is_cargo_case = any(k in text_upper for k in ["CARGO", "BULK", "BAGGAGE"])
+                is_entry_door_case = any(k in text_upper for k in ["FORWARD ENTRY", "FWD ENTRY", "PASSENGER DOOR", "ENTRY DOOR"])
 
-                    if not history_match.empty:
-                        history_match['Relevance_Score'] = history_match.astype(object).fillna('').astype(str).agg(' '.join, axis=1).apply(
-                            lambda x: sum(10 for kw in core_keywords if kw in x.upper())
-                        )
-                        history_match = history_match.sort_values(by=['Relevance_Score', 'Date'], ascending=[False, False])
+                # B. Kamus Sistem Komprehensif (Termasuk Weather Radar / WXR / PWS / Avionik)
+                system_kw_candidates = [
+                    "NOSE", "LANDING", "GEAR", "NLG", "MLG", "WHEEL", "STRUT", "TIRE", "BRAKE", "ACTUATOR",
+                    "RUDDER", "ELEVATOR", "AILERON", "FLAP", "SLAT", "STABILIZER", "TRIM", "CONTROL", "CABLE",
+                    "FUEL", "TANK", "PUMP", "VALVE", "ENGINE", "HYDRAULIC", "AVIONIC", "PITOT", "STATIC", "FMC",
+                    "RADAR", "WXR", "PWS", "WEATHER", "ANTENNA", "RECEIVER", "TRANSMITTER", "DISPLAY", "EFIS",
+                    "CARTRIDGE", "SPRING", "MIRROR", "LIGHT", "HARNESS", "LATCH", "HINGE"
+                ]
+                
+                if not is_entry_door_case and not is_cargo_case and not is_lavatory_case:
+                    if "DOOR" in text_upper:
+                        system_kw_candidates.append("DOOR")
+
+                detected_systems = [w for w in system_kw_candidates if w in text_upper]
+                
+                # Jika user mengetik ATA 34 (Weather Radar / Navigasi), pastikan kata kunci terkait masuk
+                if "34" in target_ata_final or any(k in text_upper for k in ["RADAR", "WXR", "PWS", "WEATHER", "NAVIGATION"]):
+                    detected_systems.extend(["RADAR", "WXR", "PWS", "WEATHER", "ANTENNA", "NAV", "COMM"])
+
+                # C. Kategori Gejala / Symptom
+                vibration_terms = ["VIBRAT", "SHIMMY", "SHAKE", "ROUGH", "OSCILLAT"]
+                noise_terms = ["NOISE", "NOISY", "KNOCK", "SOUND", "CREAK"]
+                leak_terms = ["LEAK", "DRIP", "SEEP"]
+                jam_terms = ["JAM", "BIND", "STUCK", "RIG", "CABLE", "DEFLECT", "BROKEN", "DAMAGED", "LOOSE", "FAIL", "INOP", "MALFUNCTION"]
+                
+                active_symptoms = []
+                if any(t in text_upper for t in vibration_terms):
+                    active_symptoms = vibration_terms
+                elif any(t in text_upper for t in noise_terms):
+                    active_symptoms = noise_terms
+                elif any(t in text_upper for t in leak_terms):
+                    active_symptoms = leak_terms
+                elif any(t in text_upper for t in jam_terms):
+                    active_symptoms = jam_terms
+
+                exclude_pattern = r'PAINT|PEEL|OFF|DETERIORATED|SCRATCH|DENT|CORROSION|POLISH|CLEAN'
+                mask_exclude = row_text.str.contains(exclude_pattern, regex=True, na=False)
+
+                # D. Masking Sistem & Lokasi secara Fleksibel
+                mask_system = pd.Series(True, index=df_ata_subset.index)
+                if detected_systems:
+                    sys_pattern = "|".join(detected_systems)
+                    mask_system = row_text.str.contains(sys_pattern, case=False, regex=True, na=False)
+
+                # Mask Lokasi Hanya Aktif Jika Kasus Terkait Lavatory / Pintu
+                mask_location = pd.Series(True, index=df_ata_subset.index)
+                if is_lavatory_case:
+                    mask_location = row_text.str.contains(r'LAVATORY|\bLAV\b|CABIN', case=False, regex=True, na=False) & \
+                                    ~row_text.str.contains(r'FORWARD ENTRY|FWD ENTRY|CARGO', case=False, regex=True, na=False)
+                elif is_entry_door_case:
+                    mask_location = row_text.str.contains(r'ENTRY|PASSENGER DOOR', case=False, regex=True, na=False)
+
+                # E. Eksekusi Hasil Match
+                if not target_ata_final and not detected_systems and not is_lavatory_case:
+                    history_match = pd.DataFrame()
                 else:
-                    history_match = df_ata_subset.copy()
+                    if active_symptoms:
+                        sym_pattern = "|".join(active_symptoms)
+                        mask_symptom = row_text.str.contains(sym_pattern, case=False, regex=True, na=False)
+                        history_match = df_ata_subset[mask_system & mask_location & mask_symptom & ~mask_exclude].copy()
+                    else:
+                        history_match = df_ata_subset[mask_system & mask_location & ~mask_exclude].copy()
+
+                # Hitung Skor Relevansi & Urutkan
+                if not history_match.empty:
+                    def calc_relevance(r_str):
+                        score = 0
+                        for sys in detected_systems:
+                            if sys in r_str: score += 20
+                        for sym in active_symptoms:
+                            if sym in r_str: score += 30
+                        if is_lavatory_case and ("LAVATORY" in r_str or "LAV" in r_str):
+                            score += 50
+                        return score
+
+                    row_text_subset = history_match.astype(object).fillna('').astype(str).agg(' '.join, axis=1).str.upper()
+                    history_match['Relevance_Score'] = row_text_subset.apply(calc_relevance)
+                    if 'Date' in history_match.columns:
+                        history_match['Date_Parsed'] = pd.to_datetime(history_match['Date'], errors='coerce')
+                        history_match = history_match.sort_values(by=['Relevance_Score', 'Date_Parsed'], ascending=[False, False])
+            else:
+                history_match = pd.DataFrame()
 
             df_gemini_trend = history_match.copy() if not history_match.empty else pd.DataFrame()
-            
-            search_pattern = ""
-            if selected_ata and len(selected_ata) >= 4:
-                main_ch = selected_ata.split('-')[0]
-                sub_digit = selected_ata.split('-')[1][0] if len(selected_ata.split('-')[1]) > 0 else "4"
-                search_pattern = f"{main_ch}-{sub_digit}"
-            
-            if not df_gemini_trend.empty and 'Corrective Action' in df_gemini_trend.columns and search_pattern:
-                df_strict = df_gemini_trend[df_gemini_trend['Corrective Action'].astype(str).str.contains(search_pattern, case=False, na=False)]
-                if not df_strict.empty:
-                    df_gemini_trend = df_strict
-
             jumlah_filtered_match = len(df_gemini_trend)
 
+            # --- 4. SIAPKAN VARIABEL KONTEN TABEL & RENTANG WAKTU UNTUK GEMINI ---
             if not df_gemini_trend.empty:
-                df_history_sorted = df_gemini_trend.head(15).copy()
-                df_history_sorted['Date_Parsed'] = pd.to_datetime(df_history_sorted['Date'], errors='coerce')
-                df_history_sorted = df_history_sorted.sort_values(by='Date_Parsed', ascending=False)
-                
-                min_date = df_history_sorted['Date_Parsed'].min()
-                max_date = df_history_sorted['Date_Parsed'].max()
+                df_history_sorted = df_gemini_trend.copy()
+                min_date = df_history_sorted['Date_Parsed'].min() if 'Date_Parsed' in df_history_sorted.columns else None
+                max_date = df_history_sorted['Date_Parsed'].max() if 'Date_Parsed' in df_history_sorted.columns else None
                 
                 if pd.notnull(min_date) and pd.notnull(max_date):
                     start_str = min_date.strftime('%d %B %Y')
@@ -701,10 +753,11 @@ if st.button("Analisis Kasus & History", key="btn_analisis_kasus", type="primary
 
             st.session_state['ac_type'] = ac_type
             st.session_state['ac_reg'] = ac_reg
-            st.session_state['kasus_baru'] = kasus_baru  # <-- DIPERBAIKI AGAR TAMPIL DI SECTION 1
-            st.session_state['selected_ata'] = selected_ata
+            st.session_state['kasus_baru'] = kasus_baru
+            st.session_state['selected_ata'] = target_ata_final if target_ata_final else selected_ata
             st.session_state['history_match'] = df_history_sorted
 
+            # --- 5. MENYUSUN PROMPT GEMINI ---
             if jumlah_filtered_match >= 5:
                 selected_method_instruction = """
                 [METODE ANALISIS YANG WAJIB DIGUNAKAN: FISHBONE / ISHIKAWA DIAGRAM]
@@ -840,7 +893,7 @@ Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type
                         "ac_type": ac_type,
                         "ac_reg": ac_reg,
                         "kasus_baru": kasus_baru,
-                        "selected_ata": selected_ata,
+                        "selected_ata": target_ata_final if target_ata_final else selected_ata,
                         "iterations": [initial_iteration],
                         "history_match": df_history_to_save.to_dict(orient="records") if not df_history_sorted.empty else []
                     }
@@ -1088,7 +1141,7 @@ with col_pdf2:
             type="primary"
         )
 
-# --- SECTION 2: HISTORICAL RECORD ---
+# --- SECTION 2: HISTORICAL RECORD (MENGGUNAKAN LEBAR FULL-WIDTH) ---
 st.markdown("---")
 ac_name_display = st.session_state.get('ac_type', '')
 record_count = len(df_hist_pdf)
@@ -1111,8 +1164,6 @@ eo_number = st.text_input("Nomor EO", "EO/2026/001")
 eo_title = st.text_input("Subject / Judul EO", "Inspection and Rectification of Aircraft System")
 compliance_category = st.selectbox("Classification", ["Mandatory", "Recommended", "Optional"], key="eo_class")
 
-# Kolom Man-Power & Material / Part Number diringkas/dihapus karena diekstrak otomatis oleh AI
-
 eo_aircraft_type = st.selectbox(
     "Pilih Tipe Armada Pesawat (EO)",
     ["DHC6-300", "DHC6-400", "B737-8", "Bell412", "AS350B3", "MIL171"],
@@ -1134,7 +1185,6 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)", key="btn_ge
             api_key = os.environ.get("GEMINI_API_KEY", st.session_state.get('user_api_key', ''))
             genai.configure(api_key=api_key)
 
-            # Ambil konteks kasus aktif atau judul EO agar pencarian manual PDF lebih spesifik
             current_defect_topic = st.session_state.get('kasus_baru', eo_title)
             current_ata_topic = st.session_state.get('selected_ata', '')
 
@@ -1143,16 +1193,14 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)", key="btn_ge
             if os.path.exists(folder_path):
                 ref_files = [f for f in os.listdir(folder_path) if f.lower().endswith('.pdf')]
                 
-                # Filter file PDF yang namanya/isinya paling mendekati ATA atau topik defect jika memungkinkan
                 for file_name in ref_files:
                     file_path = os.path.join(folder_path, file_name)
                     try:
                         with pdfplumber.open(file_path) as pdf:
-                            for page_idx, page in enumerate(pdf.pages[:15]): # Cek hingga 15 halaman per PDF
+                            for page_idx, page in enumerate(pdf.pages[:15]):
                                 text = page.extract_text()
                                 if text:
                                     text_upper = text.upper()
-                                    # Cocokkan apakah halaman mengandung nomor ATA atau kata kunci topik (misal: LIGHT)
                                     if (current_ata_topic and current_ata_topic[:2] in text_upper) or \
                                        any(kw in text_upper for kw in current_defect_topic.upper().split() if len(kw) > 3):
                                         ref_text_content += f"\n\n--- SERVER MANUAL REF ({file_name} - Page {page_idx+1}) ---\n{text[:1000]}\n"
@@ -1160,7 +1208,6 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)", key="btn_ge
                     except Exception:
                         continue
 
-            # Jika pencarian spesifik tidak menemukan hasil, ambil cuplikan umum dari file pertama
             if not ref_text_content and ref_files:
                 file_path = os.path.join(folder_path, ref_files[0])
                 with pdfplumber.open(file_path) as pdf:
