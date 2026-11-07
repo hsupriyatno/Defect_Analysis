@@ -10,7 +10,6 @@ import os
 from datetime import datetime
 import pdfplumber
 import tempfile
-import re
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -19,12 +18,24 @@ import google.generativeai as genai
 from fpdf import FPDF
 from fpdf.errors import FPDFException
 import re
+import unicodedata
 
 def clean_text_for_pdf(text):
     if not isinstance(text, str):
         return str(text)
-    # Hapus karakter unicode/box-drawing yang tidak didukung fpdf core font
+    
+    # 1. Normalisasi unicode untuk memecah karakter aksen/khusus
+    text = unicodedata.normalize('NFKD', text)
+    
+    # 2. Encode ke ascii dengan mengabaikan karakter yang tidak dikenal, lalu decode kembali ke string aman
+    text = text.encode('ascii', 'ignore').decode('ascii')
+    
+    # 3. Ganti simbol dolar, asterik markdown, dan karakter khusus lainnya
+    text = text.replace("$", "").replace("**", "").replace("*", "").replace("–", "-").replace("—", "-")
+    
+    # 4. Hapus sisa karakter box-drawing atau simbol ASCII grafis
     cleaned = re.sub(r'[│┌┐└┘├┤┬┴┼─═║╔╗╚╝╠╣╦╩╬•]', ' ', text)
+    
     return cleaned
 
 # ==========================================
@@ -612,10 +623,15 @@ if st.button("Analisis Kasus & History", key="btn_analisis_kasus", type="primary
         else:
             # --- 1. TENTUKAN TARGET ATA (Prioritas: Input User -> Deteksi RAG PDF -> Deteksi Teks Kasus) ---
             target_ata_final = selected_ata.strip()
-            if not target_ata_final and 'detected_ata' in locals() and detected_ata != "N/A":
+            
+            # PRIORITAS UTAMA: Deteksi langsung dari nomor AMM/WDM di teks defect (Cth: AMM 77-12 -> ATA 77)
+            amm_match = re.search(r'AMM\s*([0-9]{2})[-.]', kasus_baru, re.IGNORECASE)
+            if amm_match:
+                target_ata_final = amm_match.group(1)
+            elif not target_ata_final and detected_ata and detected_ata != "N/A":
                 target_ata_final = detected_ata
-            if not target_ata_final:
-                match_ata_text = re.search(r'\b(2[0-9]|3[0-8]|5[0-7])\b', kasus_baru)
+            elif not target_ata_final:
+                match_ata_text = re.search(r'\b(2[0-9]|3[0-8]|5[0-7]|7[1-9])\b', kasus_baru)
                 if match_ata_text:
                     target_ata_final = match_ata_text.group(1)
 
@@ -1319,7 +1335,8 @@ def create_eo_pdf_bytes(eo_text):
     
     pdf.set_font(font_name, size=11)
     for line in eo_text.split('\n'):
-        sanitized_line = (line.replace("–", "-")
+        # 1. Pembersihan karakter bawaan Bapak
+        cleaned_line = (line.replace("–", "-")
                             .replace("—", "-")
                             .replace("“", '"')
                             .replace("”", '"')
@@ -1328,15 +1345,26 @@ def create_eo_pdf_bytes(eo_text):
                             .replace("Ω", "Ohm")
                             .replace("±", "+/-")
                             .replace("°", " deg ")
+                            .replace("$", "")
                             .replace("|", " ")
                             .replace("---", "")
                             .replace("___", "")
                             .replace("**", "")
-                            .replace("###", "")
-                            .strip())
+                            .replace("###", ""))
+        
+        # 2. Pengaman Ekstra: Hapus simbol kotak/garis ASCII (│, ┌, └, dll.)
+        cleaned_line = re.sub(r'[│┌┐└┘├┤┬┴┼─═║╔╗╚╝╠╣╦╩╬•]', ' ', cleaned_line)
+        
+        # 3. Pengaman Mutlak HP/Mobile: Paksa abaikan karakter unicode di luar standar
+        try:
+            sanitized_line = cleaned_line.encode('ascii', 'ignore').decode('ascii').strip()
+        except Exception:
+            sanitized_line = cleaned_line.strip()
+
         if not sanitized_line:
             pdf.ln(3)
             continue
+            
         pdf.multi_cell(0, 5.5, sanitized_line, align='L', new_x="LMARGIN", new_y="NEXT")
         
     return bytes(pdf.output())
