@@ -631,63 +631,48 @@ if st.button("Analisis Kasus & History", key="btn_analisis_kasus", type="primary
             else:
                 df_ata_subset = df_defect.copy()
 
-            # --- 3. FILTER DUA DIMENSI: SYSTEM/COMPONENT + SYMPTOM/EVENT (FLEKSIBEL) ---
+            # --- 3. FILTER DUA DIMENSI: EKSTRAKSI KATA KUNCI DINAMIS & OTOMATIS ---
             history_match = pd.DataFrame()
             
             if not df_ata_subset.empty:
                 row_text = df_ata_subset.astype(object).fillna('').astype(str).agg(' '.join, axis=1).str.upper()
                 text_upper = kasus_baru.upper()
                 
-                # A. Deteksi Jenis Kasus (Apakah spesifik Lavatory/Pintu atau Sistem Umum/Avionik)
+                # A. Ekstraksi Frasa & Kata Kunci Bermakna (Hindari Kata Sambung Umum)
+                raw_words = re.findall(r'\b[A-Za-z0-9]+\b', text_upper)
+                stop_words = {
+                    "THE", "TO", "OF", "AND", "A", "IN", "IS", "IT", "FOR", "ON", "WITH", "NOT", 
+                    "FAIL", "FAILED", "FAULT", "FOUND", "DURING", "PRE", "FLIGHT", "AFTER", "BEFORE",
+                    "AT", "THIS", "AN", "BY", "FROM", "AS", "THAT", "OR", "BE", "WAS", "FIRST", "ATTEMPT"
+                }
+                # Hanya ambil kata kunci teknis yang panjangnya > 2 dan bukan stop words
+                significant_keywords = [w for w in raw_words if len(w) > 2 and w not in stop_words]
+
+                # Deteksi Kasus Khusus
                 is_lavatory_case = any(k in text_upper for k in ["LAVATORY", "LAV", "TOILET", "CABIN"])
-                is_cargo_case = any(k in text_upper for k in ["CARGO", "BULK", "BAGGAGE"])
                 is_entry_door_case = any(k in text_upper for k in ["FORWARD ENTRY", "FWD ENTRY", "PASSENGER DOOR", "ENTRY DOOR"])
+                is_engine_start_case = any(k in text_upper for k in ["START", "STARTING", "IGNITION", "CRANK"]) and any(k in text_upper for k in ["ENG", "ENGINE"])
 
-                # B. Kamus Sistem Komprehensif (Termasuk Weather Radar / WXR / PWS / Avionik)
-                system_kw_candidates = [
-                    "NOSE", "LANDING", "GEAR", "NLG", "MLG", "WHEEL", "STRUT", "TIRE", "BRAKE", "ACTUATOR",
-                    "RUDDER", "ELEVATOR", "AILERON", "FLAP", "SLAT", "STABILIZER", "TRIM", "CONTROL", "CABLE",
-                    "FUEL", "TANK", "PUMP", "VALVE", "ENGINE", "HYDRAULIC", "AVIONIC", "PITOT", "STATIC", "FMC",
-                    "RADAR", "WXR", "PWS", "WEATHER", "ANTENNA", "RECEIVER", "TRANSMITTER", "DISPLAY", "EFIS",
-                    "CARTRIDGE", "SPRING", "MIRROR", "LIGHT", "HARNESS", "LATCH", "HINGE"
-                ]
-                
-                if not is_entry_door_case and not is_cargo_case and not is_lavatory_case:
-                    if "DOOR" in text_upper:
-                        system_kw_candidates.append("DOOR")
-
-                detected_systems = [w for w in system_kw_candidates if w in text_upper]
-                
-                # Jika user mengetik ATA 34 (Weather Radar / Navigasi), pastikan kata kunci terkait masuk
-                if "34" in target_ata_final or any(k in text_upper for k in ["RADAR", "WXR", "PWS", "WEATHER", "NAVIGATION"]):
-                    detected_systems.extend(["RADAR", "WXR", "PWS", "WEATHER", "ANTENNA", "NAV", "COMM"])
-
-                # C. Kategori Gejala / Symptom
-                vibration_terms = ["VIBRAT", "SHIMMY", "SHAKE", "ROUGH", "OSCILLAT"]
-                noise_terms = ["NOISE", "NOISY", "KNOCK", "SOUND", "CREAK"]
-                leak_terms = ["LEAK", "DRIP", "SEEP"]
-                jam_terms = ["JAM", "BIND", "STUCK", "RIG", "CABLE", "DEFLECT", "BROKEN", "DAMAGED", "LOOSE", "FAIL", "INOP", "MALFUNCTION"]
-                
-                active_symptoms = []
-                if any(t in text_upper for t in vibration_terms):
-                    active_symptoms = vibration_terms
-                elif any(t in text_upper for t in noise_terms):
-                    active_symptoms = noise_terms
-                elif any(t in text_upper for t in leak_terms):
-                    active_symptoms = leak_terms
-                elif any(t in text_upper for t in jam_terms):
-                    active_symptoms = jam_terms
-
-                exclude_pattern = r'PAINT|PEEL|OFF|DETERIORATED|SCRATCH|DENT|CORROSION|POLISH|CLEAN'
+                exclude_pattern = r'PAINT|PEEL|OFF|DETERIORATED|SCRATCH|DENT|CORROSION|POLISH|CLEAN|FIRST\s*AID|MEDICAL\s*KIT|POB'
                 mask_exclude = row_text.str.contains(exclude_pattern, regex=True, na=False)
 
-                # D. Masking Sistem & Lokasi secara Fleksibel
-                mask_system = pd.Series(True, index=df_ata_subset.index)
-                if detected_systems:
-                    sys_pattern = "|".join(detected_systems)
-                    mask_system = row_text.str.contains(sys_pattern, case=False, regex=True, na=False)
+                # B. MASKING BERLAPIS KETAT (Mencegah First Aid Kit atau kata parsial lolos)
+                mask_system = pd.Series(False, index=df_ata_subset.index)
+                
+                if is_engine_start_case:
+                    # Jika kasus Start Engine, baris WAJIB mengandung elemen Engine DAN Start/Ignition secara bersamaan
+                    has_engine = row_text.str.contains(r'\bENG\b|\bENGINE\b|\bENG1\b|\bENG2\b', regex=True, na=False)
+                    has_start = row_text.str.contains(r'START|STARTING|CRANK|IGNITION', regex=True, na=False)
+                    mask_system = has_engine & has_start
+                elif significant_keywords:
+                    # Untuk kasus lain, minimal harus mencocokkan sebagian besar kata kunci inti secara simultan
+                    # (Tidak boleh hanya mengandalkan 1 kata umum seperti 'FIRST')
+                    match_counts = sum(row_text.str.contains(kw, case=False, regex=False, na=False) for kw in significant_keywords)
+                    # Syarat: minimal ada 2 kata kunci yang cocok, atau 1 kata jika total keyword input hanya 1
+                    threshold = min(2, len(significant_keywords))
+                    mask_system = match_counts >= threshold
 
-                # Mask Lokasi Hanya Aktif Jika Kasus Terkait Lavatory / Pintu
+                # Mask Lokasi Khusus
                 mask_location = pd.Series(True, index=df_ata_subset.index)
                 if is_lavatory_case:
                     mask_location = row_text.str.contains(r'LAVATORY|\bLAV\b|CABIN', case=False, regex=True, na=False) & \
@@ -695,31 +680,32 @@ if st.button("Analisis Kasus & History", key="btn_analisis_kasus", type="primary
                 elif is_entry_door_case:
                     mask_location = row_text.str.contains(r'ENTRY|PASSENGER DOOR', case=False, regex=True, na=False)
 
-                # E. Eksekusi Hasil Match
-                if not target_ata_final and not detected_systems and not is_lavatory_case:
+                # C. Eksekusi Hasil Match yang Bersih dari False Positive
+                if not target_ata_final and not significant_keywords:
                     history_match = pd.DataFrame()
                 else:
-                    if active_symptoms:
-                        sym_pattern = "|".join(active_symptoms)
-                        mask_symptom = row_text.str.contains(sym_pattern, case=False, regex=True, na=False)
-                        history_match = df_ata_subset[mask_system & mask_location & mask_symptom & ~mask_exclude].copy()
-                    else:
-                        history_match = df_ata_subset[mask_system & mask_location & ~mask_exclude].copy()
+                    history_match = df_ata_subset[mask_system & mask_location & ~mask_exclude].copy()
 
-                # Hitung Skor Relevansi & Urutkan
+                # PENGAMAN TAMBAHAN: Singkirkan baris yang merujuk pada E/O / Engineering Order
+                if not history_match.empty:
+                    row_text_all = history_match.astype(object).fillna('').astype(str).agg(' '.join, axis=1).str.upper()
+                    mask_eo_ref = row_text_all.str.contains(r'E/O|\bEO\b|ENGINEERING\s*ORDER', regex=True, na=False)
+                    history_match = history_match[~mask_eo_ref].copy()
+
+                # D. HITUNG SKOR RELEVANSI BERBASIS KECOCOKAN FRASA
                 if not history_match.empty:
                     def calc_relevance(r_str):
                         score = 0
-                        for sys in detected_systems:
-                            if sys in r_str: score += 20
-                        for sym in active_symptoms:
-                            if sym in r_str: score += 30
-                        if is_lavatory_case and ("LAVATORY" in r_str or "LAV" in r_str):
+                        for kw in significant_keywords:
+                            if kw in r_str: score += 20
+                        # Bonus tinggi jika frasa spesifik "START" dan "ENG" berdampingan
+                        if "START" in r_str and ("ENG" in r_str or "ENGINE" in r_str):
                             score += 50
                         return score
 
                     row_text_subset = history_match.astype(object).fillna('').astype(str).agg(' '.join, axis=1).str.upper()
                     history_match['Relevance_Score'] = row_text_subset.apply(calc_relevance)
+                    
                     if 'Date' in history_match.columns:
                         history_match['Date_Parsed'] = pd.to_datetime(history_match['Date'], errors='coerce')
                         history_match = history_match.sort_values(by=['Relevance_Score', 'Date_Parsed'], ascending=[False, False])
@@ -760,17 +746,25 @@ if st.button("Analisis Kasus & History", key="btn_analisis_kasus", type="primary
             # --- 5. MENYUSUN PROMPT GEMINI ---
             if jumlah_filtered_match >= 5:
                 selected_method_instruction = """
-                [METODE ANALISIS YANG WAJIB DIGUNAKAN: FISHBONE / ISHIKAWA DIAGRAM]
+                [METODE ANALISIS & REKAPITULASI YANG WAJIB DIGUNAKAN: FISHBONE / ISHIKAWA DIAGRAM]
                 1. Tuliskan terlebih dahulu paragraf tinjauan tren & korelasi historis di awal.
-                2. Buatlah diagram Fishbone / Ishikawa menggunakan teks ASCII di dalam blok kode (``` ... ```).
-                3. SETELAH diagram Fishbone, wajib tuliskan paragraf analisis dan evaluasi mendalam yang mengulas poin-poin penyebab utama dari diagram tersebut (misalnya analisis faktor Machine, Material, Method, dan Environment).
+                2. **WAJIB BUAT TABEL REKAPITULASI BULANAN** berdasarkan data historis di atas dalam format Markdown persis seperti ini:
+                   | Bulan | Jumlah Defect | Keterangan / Tren |
+                   | :--- | :---: | :--- |
+                   | (Contoh: Bulan-1) | (Jumlah) | (Keterangan singkat) |
+                3. Buatlah diagram Fishbone / Ishikawa menggunakan teks ASCII di dalam blok kode (``` ... ```).
+                4. SETELAH diagram Fishbone, wajib tuliskan paragraf analisis dan evaluasi mendalam yang mengulas poin-poin penyebab utama dari diagram tersebut (Machine, Material, Method, Environment).
                 """
             else:
                 selected_method_instruction = """
-                [METODE ANALISIS YANG WAJIB DIGUNAKAN: 5 WHYS INVESTIGATION]
+                [METODE ANALISIS & REKAPITULASI YANG WAJIB DIGUNAKAN: 5 WHYS INVESTIGATION]
                 1. Tuliskan paragraf tinjauan tren di awal.
-                2. Buat penelusuran 5 Whys di dalam blok kode (``` ... ```).
-                3. SETELAH penelusuran 5 Whys, wajib tuliskan paragraf evaluasi kesimpulan akar masalah.
+                2. **WAJIB BUAT TABEL REKAPITULASI BULANAN** berdasarkan data historis di atas dalam format Markdown persis seperti ini:
+                   | Bulan | Jumlah Defect | Keterangan / Tren |
+                   | :--- | :---: | :--- |
+                   | (Contoh: Bulan-1) | (Jumlah) | (Keterangan singkat) |
+                3. Buat penelusuran 5 Whys di dalam blok kode (``` ... ```).
+                4. SETELAH penelusuran 5 Whys, wajib tuliskan paragraf evaluasi kesimpulan akar masalah.
                 """
 
             additional_file_instruction = ""
@@ -797,33 +791,41 @@ REFERENSI MANUAL PDF RESMI (RAG):
 DATA HISTORI DARI DATABASE UNSCHEDULED ARMADA {ac_type} (Spesifik Sub-sistem ATA {selected_ata}):
 - Total Ditemukan: {jumlah_filtered_match} record/kejadian defect serupa.
 - Periode Waktu Kejadian: {date_range_info}
-- Buatkan tabel Jumlah Defect Dalam Tiap bulan vs Bulan berdasarkan data spesifik sub-sistem ini.
 
 SAMPEL RECORD TERAKHIR DARI DATABASE UNSCHEDULED ARMADA {ac_type}:
 {context_history}
+
+MANDATORY COMPLIANCE INSTRUCTIONS:
+1. **MANUAL REFERENCES BY AIRCRAFT TYPE**: 
+   - If fleet is B737-8: You MUST explicitly cite exact AMM tasks, WDM diagrams, and Boeing FTD bulletins.
+   - If fleet is DHC6-300 / DHC6-400 / Bell412 / AS350B3 / MIL171: Cite exact AMM tasks, WDM, or manufacturer maintenance manuals (strictly exclude Boeing-specific FTD).
+2. **IFIM INTEGRATION**: Always check whether an applicable **IFIM (Fault Isolation Manual)** task exists for this defect symptom and incorporate the fault isolation procedure.
 
 TUGAS ANDA:
 Berikan analisis teknis lengkap dalam Bahasa Indonesia dengan format persis berikut:
 
 [BAHASA_INDONESIA]
 [SYSTEM]
-Jelaskan secara ringkas prinsip kerja, fungsi utama, dan arsitektur sistem/komponen terkait pada armada {ac_type}.
+Jelaskan secara ringkas prinsip kerja, fungsi utama, dan arsitektur sistem/komponen terkait pada armada {ac_type}. Wajib cantumkan nomor rujukan AMM/WDM yang relevan.
 
 [RCA]
 {selected_method_instruction}
+*Catatan Investigasi*: Lakukan pengecekan referensi apakah terdapat panduan **IFIM (Fault Isolation Manual)** untuk fault code/gejala ini. Jika ada, integrasikan logika pohon kesalahan (fault isolation tree) dari IFIM tersebut.
 
 [RECOMMENDATIONS]
-Berikan langkah troubleshooting praktis, Corrective Action (IAW AMM/WDM {ac_type}), serta Operational Special Test / Test Flight Monitoring.
+1. Berikan langkah troubleshooting praktis IAW AMM/WDM {ac_type}.
+2. **WAJIB CEK & IMPLEMENTASIKAN IFIM**: Jika dokumen referensi/RAG atau standar pabrikan menyediakan task IFIM, tuliskan nomor task IFIM tersebut beserta langkah isolasi kerusakannya.
+3. Cantumkan prosedur Corrective Action, Test Flight Monitoring, atau Operational Special Test.
 
 [BAHASA_INGGRIS]
 [SYSTEM]
-(Provide exact System Description translated into professional aviation engineering English)
+(Provide exact System Description translated into professional aviation engineering English, including AMM/WDM references)
 
 [RCA]
-(Provide exact RCA translated into professional aviation engineering English)
+(Provide exact RCA translated into professional aviation engineering English, incorporating IFIM logic if available)
 
 [RECOMMENDATIONS]
-(Provide exact Recommendations translated into professional aviation engineering English)
+(Provide exact Recommendations translated into professional aviation engineering English, explicitly stating AMM tasks and IFIM fault isolation procedures)
 """
 
             with st.spinner(f"Menganalisis histori, dokumen RAG, & lampiran armada {ac_type} via Gemini..."):
@@ -1041,6 +1043,8 @@ if 'iterations' in st.session_state and st.session_state['iterations']:
                     prompt_feedback = f"""
 Anda adalah pakar Reliability Engineering penerbangan yang sedang melakukan evaluasi berulang (iterasi ke-{iteration_number}) untuk armada {current_report.get('ac_type')}.
 
+# Di dalam prompt Gemini (baik Analisis Utama, Feedback, maupun EO), bagian rujukan dokumen dapat disesuaikan secara dinamis:
+
 INFORMASI AWAL DEFECT (DAN: {current_report.get('dan_number')}):
 - Aircraft Type: {current_report.get('ac_type')} ({current_report.get('ac_reg', 'N/A')})
 - ATA Chapter: {current_report.get('selected_ata', 'N/A')}
@@ -1050,28 +1054,32 @@ CATATAN EKSEKUSI & TEMUAN ENGINEER DI LAPANGAN (ITERASI {iteration_number}):
 {feedback_text if feedback_text.strip() else '(Tidak ada catatan teks, mengandalkan analisis lampiran gambar/PDF)'}
 {feedback_file_instruction}
 
+MANDATORY COMPLIANCE INSTRUCTIONS FOR THIS ITERATION:
+1. **AMM / WDM / FTD REFERENCES**: Always cite exact AMM tasks, WDM diagrams, or FTD bulletins relevant to this feedback and troubleshooting step.
+2. **IFIM INTEGRATION**: Check and incorporate specific **IFIM (Fault Isolation Manual)** troubleshooting steps or test procedures if applicable to the updated findings.
+
 TUGAS ANDA:
 Lakukan evaluasi ulang, pertajam Root Cause Analysis (RCA), dan berikan rekomendasi tindakan tingkat lanjut (Next Action Step/Secondary Troubleshooting) dalam Bahasa Indonesia dan Bahasa Inggris dengan format persis:
 
 [BAHASA_INDONESIA]
 [SYSTEM]
-Penjelasan singkat relevansi temuan/rektifikasi baru terhadap sistem terkait.
+Penjelasan singkat relevansi temuan/rektifikasi baru terhadap sistem terkait, termasuk rujukan AMM/WDM.
 
 [RCA]
-Analisis penyebab mendalam (Deep-Dive RCA) berdasarkan hasil eksekusi dan lampiran visual/dokumen terbaru.
+Analisis penyebab mendalam (Deep-Dive RCA) berdasarkan hasil eksekusi dan lampiran visual/dokumen terbaru, dengan mengintegrasikan logika panduan IFIM jika ada.
 
 [RECOMMENDATIONS]
-Rekomendasi tindakan teknis lanjutan, pemeriksaan komponen sekunder, atau penyesuaian interval inspeksi.
+Rekomendasi tindakan teknis lanjutan, langkah pemeriksaan AMM/IFIM task spesifik, atau penyesuaian interval inspeksi.
 
 [BAHASA_INGGRIS]
 [SYSTEM]
-(System update in English)
+(System update in English with AMM/WDM references)
 
 [RCA]
-(Deep-Dive RCA update in English)
+(Deep-Dive RCA update in English, incorporating IFIM logic)
 
 [RECOMMENDATIONS]
-(Next action recommendations in English)
+(Next action recommendations in English with explicit AMM/IFIM tasks)
 """
 
                     with st.spinner(f"Menganalisis feedback & lampiran rektifikasi iterasi ke-{iteration_number}..."):
@@ -1230,27 +1238,33 @@ if st.button("✨ Generate Draf Engineering Order (Form ATD-F-308)", key="btn_ge
 
             prompt_eo = f"""
 Act as a Senior Technical Services & Reliability Engineer at PT Airfast Indonesia.
-Your task is to draft a formal, high-standard Engineering Order (EO) following Form ATD-F-308 strictly based on the specific defect case and reference manuals below. Do not mix it up with other ATA chapters (such as fuel or hydraulics unless specified).
+Your task is to draft a formal, high-standard Engineering Order (EO) following Form ATD-F-308 strictly based on the specific defect case and reference manuals below.
+
+# Di dalam prompt Gemini (baik Analisis Utama, Feedback, maupun EO), bagian rujukan dokumen dapat disesuaikan secara dinamis:
+
 
 SELECTED AIRCRAFT FLEET: {eo_aircraft_type}
 - EO Number: {eo_number}
 - Subject / Defect Focus: {eo_title} (Reported Defect Context: {current_defect_topic}, ATA Chapter: {current_ata_topic if current_ata_topic else 'Auto-detect'})
 - Classification: {compliance_category}
-- Estimated Man Power & Material / Parts Required: (Extract and determine these automatically based strictly on the target system/component)
 
 RELEVANT REFERENCE TEXT EXTRACTED (SERVER & USER):
 {ref_text_content if ref_text_content else "Use standard fleet references for this specific system."}
+
+MANDATORY COMPLIANCE INSTRUCTIONS FOR THIS EO:
+1. **AMM / WDM / FTD REFERENCES**: You MUST explicitly cite exact AMM tasks, WDM diagrams, or Boeing FTD bulletins in the reference and accomplishment sections. Never omit manual numbers.
+2. **IFIM INTEGRATION**: Always check whether an applicable **IFIM (Fault Isolation Manual)** task exists for this defect symptom. If available, incorporate the step-by-step fault isolation procedure (troubleshooting logic tree) into the Accomplishment Instructions.
 
 OUTPUT FORMAT INSTRUCTIONS:
 - Write the entire draft in professional English.
 - Follow the formal Airfast Indonesia Form ATD-F-308 structure precisely:
   1. Reason of Issuance
-  2. Description & Background (Must focus precisely on the reported defect/subject, e.g., Landing Light / ATA 33)
-  3. Reference Documents
+  2. Description & Background (Must detail the technical anomaly and background)
+  3. Reference Documents (Explicitly list AMM, WDM, FTD, and IFIM tasks)
   4. Compliance & Applicability
-  5. Tools & Parts Required (Extracted automatically)
-  6. Man Power Estimation (Extracted automatically)
-  7. Accomplishment Instructions
+  5. Tools & Parts Required
+  6. Man Power Estimation
+  7. Accomplishment Instructions (Must include step-by-step AMM/IFIM procedures)
   8. Return to Service (RTS)
   9. Authorization & Sign-Off
 """
