@@ -664,21 +664,24 @@ if st.button("Analisis Kasus & History", key="btn_analisis_kasus", type="primary
                 mask_exclude = row_text.str.contains(exclude_pattern, regex=True, na=False)
 
                 # B. MASKING BERLAPIS KETAT (Mencegah First Aid Kit atau kata parsial lolos)
+                # B. MASKING KEJADIAN SPESIFIK (Mencegah False Positive seperti First Aid Kit)
                 mask_system = pd.Series(False, index=df_ata_subset.index)
                 
-                if is_engine_start_case:
-                    # Jika kasus Start Engine, baris WAJIB mengandung elemen Engine DAN Start/Ignition secara bersamaan
-                    has_engine = row_text.str.contains(r'\bENG\b|\bENGINE\b|\bENG1\b|\bENG2\b', regex=True, na=False)
-                    has_start = row_text.str.contains(r'START|STARTING|CRANK|IGNITION', regex=True, na=False)
-                    mask_system = has_engine & has_start
-                elif significant_keywords:
-                    # Untuk kasus lain, minimal harus mencocokkan sebagian besar kata kunci inti secara simultan
-                    # (Tidak boleh hanya mengandalkan 1 kata umum seperti 'FIRST')
-                    match_counts = sum(row_text.str.contains(kw, case=False, regex=False, na=False) for kw in significant_keywords)
-                    # Syarat: minimal ada 2 kata kunci yang cocok, atau 1 kata jika total keyword input hanya 1
-                    threshold = min(2, len(significant_keywords))
-                    mask_system = match_counts >= threshold
+                # Cek apakah ini murni kasus Engine Start / Failure
+                is_engine_start_case = any(k in text_upper for k in ["START", "STARTING", "CRANK", "IGNITION", "UNABLE"]) and any(k in text_upper for k in ["ENG", "ENGINE"])
 
+                if is_engine_start_case:
+                    # Harus mengandung kata Engine DAN Start secara bersamaan dalam baris yang sama, dan mutlak buang First Aid
+                    has_engine = row_text.str.contains(r'\bENG\b|\bENGINE\b|\bENG1\b|\bENG2\b', regex=True, na=False)
+                    has_start = row_text.str.contains(r'\bSTART\b|\bSTARTED\b|\bSTARTING\b|\bCRANK\b|\bIGNITION\b', regex=True, na=False)
+                    not_medical = ~row_text.str.contains(r'FIRST\s*AID|MEDICAL|POB|CABIN\s*CREW', regex=True, na=False)
+                    mask_system = has_engine & has_start & not_medical
+                else:
+                    # Filter standar berbasis kecocokan frasa bermakna tinggi
+                    if significant_keywords:
+                        match_counts = sum(row_text.str.contains(r'\b' + re.escape(kw) + r'\b', case=False, regex=True, na=False) for kw in significant_keywords)
+                        threshold = max(1, len(significant_keywords) // 2)
+                        mask_system = (match_counts >= threshold) & ~row_text.str.contains(r'FIRST\s*AID|MEDICAL|POB', regex=True, na=False)
                 # Mask Lokasi Khusus
                 mask_location = pd.Series(True, index=df_ata_subset.index)
                 if is_lavatory_case:
