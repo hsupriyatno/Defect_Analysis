@@ -10,8 +10,7 @@ import os
 from datetime import datetime
 import pdfplumber
 import tempfile
-
-# Import modul ReportLab untuk PDF
+import re
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -19,6 +18,14 @@ from reportlab.lib import colors
 import google.generativeai as genai
 from fpdf import FPDF
 from fpdf.errors import FPDFException
+import re
+
+def clean_text_for_pdf(text):
+    if not isinstance(text, str):
+        return str(text)
+    # Hapus karakter unicode/box-drawing yang tidak didukung fpdf core font
+    cleaned = re.sub(r'[│┌┐└┘├┤┬┴┼─═║╔╗╚╝╠╣╦╩╬•]', ' ', text)
+    return cleaned
 
 # ==========================================
 # 1. SET TOKEN OAUTH / BEARER & GEMINI CONFIG
